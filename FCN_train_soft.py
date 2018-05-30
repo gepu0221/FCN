@@ -20,16 +20,16 @@ tf.flags.DEFINE_integer("v_batch_size","12","batch size for validation")
 tf.flags.DEFINE_integer("temperature", "1", "The temperature use to train soft targets model")
 tf.flags.DEFINE_integer('normal', "255", "Use to normalize the label.")
 #THe path to save train model.
-tf.flags.DEFINE_string("logs_dir", "logs20180529_s6_soft/", "path to logs directory")
+tf.flags.DEFINE_string("logs_dir", "logs20180529_total_soft/", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs_test", "path to logs directory")
 #The path to save segmentation result. 
 tf.flags.DEFINE_string("result_dir","result/","path to save the result")
 #The path to load the trian/validation data.
-tf.flags.DEFINE_string("data_dir", "image_save20180529_s6_soft", "path to dataset")
+tf.flags.DEFINE_string("data_dir", "image_save20180527_soft", "path to dataset")
 #the learning rate
-tf.flags.DEFINE_float("learning_rate", "1e-5", "Learning rate for Adam Optimizer")
-#tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer")
+#tf.flags.DEFINE_float("learning_rate", "1e-5", "Learning rate for Adam Optimizer")
+tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer")
 #The initialization model.
 tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 
@@ -149,9 +149,9 @@ def inference(image, keep_prob):
         annotation_pred_value = tf.cast(tf.subtract(tf.reduce_max(conv_t3,3),tf.reduce_min(conv_t3,3)),tf.int32)
         #annotation_pred_value = tf.argmax(conv_t3, dimension=3, name="prediction")
         annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
-        conv_t3_n = tf.nn.l2_normalize(conv_t3, dim = 3)
+        #conv_t3_n = tf.nn.l2_normalize(conv_t3, dim = 3)
 
-    return tf.expand_dims(annotation_pred_value,dim=3),tf.expand_dims(annotation_pred, dim=3), conv_t3_n
+    return tf.expand_dims(annotation_pred_value,dim=3),tf.expand_dims(annotation_pred, dim=3), conv_t3
 
 
 def train(loss_val, var_list):
@@ -180,11 +180,25 @@ def main(argv=None):
     #                                                                      labels=tf.squeeze(annotation, squeeze_dims=[3]),
     #                                                                      name="entropy")))
     #The update is not finished.?????????????????????????????????????!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    '''
     soft_logits = tf.nn.softmax(logits/FLAGS.temperature)
     soft_loss = tf.reduce_mean((tf.nn.sigmoid_cross_entropy_with_logits(logits=soft_logits,
                                                                  #labels = tf.squeeze(soft_annotation, squeeze_dims=[3]),
                                                                   labels = soft_annotation,
                                                                   name = "entropy_soft")))
+    #use weight
+    soft_loss0 = 0.8*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=soft_logits[:,:,:,0],
+                                                         labels=soft_annotation[:,:,:,0],
+                                                         name ="entropy_soft0"))
+    soft_loss1 = 0.2*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=soft_logits[:,:,:,1],
+                                                         labels=soft_annotation[:,:,:,1],
+                                                         name ="entropy_soft1"))
+    soft_loss = tf.add(soft_loss0, soft_loss1)
+    '''
+    soft_logits = tf.nn.softmax(logits/FLAGS.temperature)
+    soft_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits/FLAGS.temperature,
+                                                                        labels = soft_annotation,
+                                                                        name = "entropy_soft"))
     hard_loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
                                                                   labels=tf.squeeze(hard_annotation, squeeze_dims=[3]),
                                                                   name="entropy_hard")))
@@ -252,7 +266,8 @@ def main(argv=None):
     for itr in xrange(MAX_ITERATION):
         
         train_images, train_annotations = train_dataset_reader.next_batch(FLAGS.batch_size)
-        feed_dict = {image: train_images, soft_annotation: train_annotations/FLAGS.normal, keep_probability: 0.85}
+        train_annotations_n = train_annotations/FLAGS.normal
+        feed_dict = {image: train_images, soft_annotation: train_annotations_n, keep_probability: 0.85}
 
         sess.run(train_op, feed_dict=feed_dict)
         logs_file = open(path_, 'a')  
@@ -261,29 +276,34 @@ def main(argv=None):
             num_ = 0
             for ii in range(224):
                 for jj in range(224):
-                    if train_annotations_[0][ii][jj][1] > train_annotations_[0][ii][jj][0]:
-                        print('anno',ii,', ', jj,': ', train_annotations_[0][ii][jj])
+                    #if train_annotations_n[0][ii][jj][1] > train_annotations_n[0][ii][jj][0]:
+                    if train_annotations_n[0][ii][jj][1] > 0.85:
+                        #print('anno',ii,', ', jj,': ', train_annotations_n[0][ii][jj])
                         num_ = num_+1
-            print("the number of 0<1: %d" % num_)
+            print("the number of dim1>0.85: %d" % num_)
             '''
             soft_train_logits, train_logits = sess.run([soft_logits, logits], feed_dict=feed_dict)
             train_logits = np.array(train_logits)
             soft_train_logits = np.array(soft_train_logits)
-            #print("softmax after temperature", train_softmax)
-            #print('shape of soft_train_logits',soft_train_logits.shape)
-            #print('shape of train_logits', train_logits.shape)
+            '''
             num_ = 0
             for ii in range(224):
                 for jj in range(224):
-                    if soft_train_logits[0][ii][jj][1] > soft_train_logits[0][ii][jj][0]:
-                       #print('logtis',ii,', ', jj,': ', train_logits[0][ii][jj])
-                       #print('soft_logtis',ii,', ', jj,': ', soft_train_logits[0][ii][jj])
+                    if train_annotations_n[0][ii][jj][1] > 0.85:
+                    #if soft_train_logits[0][ii][jj][1] > soft_train_logits[0][ii][jj][0]:
+                    #if soft_train_logits[0][ii][jj][1] > 0.82:
+                        #print('logtis',ii,', ', jj,': ', train_logits[0][ii][jj])
+                        print('soft_logtis',ii,', ', jj,': ', soft_train_logits[0][ii][jj])
+                        print('anno       ',ii,', ', jj,': ', train_annotations_n[0][ii][jj])
+                        print('--------------------')
+                    if soft_train_logits[0][ii][jj][1] > 0.82:
                         num_ = num_+1
-            print("the number of 0<1: %d" % num_)
-            
+            print("the number of dim1>0.82: %d" % num_)
+            '''
 
             train_loss, summary_str = sess.run([soft_loss, summary_op], feed_dict=feed_dict)
             print("Step: %d, Train_loss:%g" % (itr, train_loss))
+            logs_file.write("Step: %d, Train_loss:%g\n" % (itr, train_loss))
             summary_writer.add_summary(summary_str, itr)
 
         if itr % 500 == 0:
@@ -293,7 +313,6 @@ def main(argv=None):
             train_logits,train_loss,train_pred_anno = sess.run([soft_logits,soft_loss,pred_annotation], feed_dict={image:train_random_images,
                                                                                         soft_annotation:train_random_annotations/FLAGS.normal,
                                                                                         keep_probability:1.0})
-
             #accu_iou_,accu_pixel_ = accu.caculate_accurary(train_pred_anno, train_random_annotations/100)
             print("%s ---> Training_loss: %g" % (datetime.datetime.now(), train_loss))
             #print("%s ---> Training_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel_))
