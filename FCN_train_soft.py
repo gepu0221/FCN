@@ -20,16 +20,16 @@ tf.flags.DEFINE_integer("v_batch_size","12","batch size for validation")
 tf.flags.DEFINE_integer("temperature", "1", "The temperature use to train soft targets model")
 tf.flags.DEFINE_integer('normal', "255", "Use to normalize the label.")
 #THe path to save train model.
-tf.flags.DEFINE_string("logs_dir", "logs20180529_total_soft/", "path to logs directory")
+tf.flags.DEFINE_string("logs_dir", "logs20180531_soft_total/", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs_test", "path to logs directory")
 #The path to save segmentation result. 
 tf.flags.DEFINE_string("result_dir","result/","path to save the result")
 #The path to load the trian/validation data.
-tf.flags.DEFINE_string("data_dir", "image_save20180527_soft", "path to dataset")
+tf.flags.DEFINE_string("data_dir", "image_save20180530_soft_total", "path to dataset")
 #the learning rate
-#tf.flags.DEFINE_float("learning_rate", "1e-5", "Learning rate for Adam Optimizer")
-tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer")
+tf.flags.DEFINE_float("learning_rate", "1e-6", "Learning rate for Adam Optimizer")
+#tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer")
 #The initialization model.
 tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 

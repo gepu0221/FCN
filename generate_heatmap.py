@@ -25,7 +25,6 @@ def density_heatmap(image, density_range = 1000):
         for j in range(im_w):
             prob_ = int(image[i][j]*1000)
             prob_ = min(density_range_, prob_)
-            print("(%d, %d), %d" % (i, j, prob_))
             for k in range(3):
                 color_map[i][j][k] = rgb_colors[prob_][k]
 

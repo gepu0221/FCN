@@ -2,7 +2,7 @@ import numpy as np
 from ellipse_my import ellipse_my
 import cv2
 import time
-
+soft_thred = 0.95
 def generate_heat_map(sz_,pred_value):
     #im_h=np.zeros((sz_[0],sz_[1],1))
     for i in range(sz_[0]):
@@ -34,6 +34,23 @@ def pred_visualize(image,pred):
                 
     #return image,pred
     return image
+
+#Use to check the prediction segmentation result.
+#label with green.
+def soft_pred_visualize(image,pred):
+    
+    i_sz=image.shape
+    for i in range(i_sz[0]):
+        for j in range(i_sz[1]):
+            #print(pred[i][j])
+            if pred[i][j]>soft_thred:
+                image[i,j,0]=0
+                image[i,j,1]=255
+                image[i,j,2]=0
+                
+    #return image,pred
+    return image
+
 
 #Use to check the annotaion(true) segmentation result.
 #label with blue

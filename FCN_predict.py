@@ -19,14 +19,14 @@ tf.flags.DEFINE_integer("batch_size", "32", "batch size for training")
 tf.flags.DEFINE_integer("v_batch_size","120","batch size for validation")
 tf.flags.DEFINE_integer("pred_num","1612","number for prediction")
 #THe path to save train model.
-tf.flags.DEFINE_string("logs_dir", "logs20180527_soft", "path to logs directory")
+tf.flags.DEFINE_string("logs_dir", "logs20180529_s6_soft", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs_test", "path to logs directory")
 #The path to save segmentation result. 
 tf.flags.DEFINE_string("result_dir","result","path to save the result")
 #The path to load the trian/validation data.
 
-tf.flags.DEFINE_string("data_dir", "image_save20180527_soft", "path to dataset")
+tf.flags.DEFINE_string("data_dir", "image_save20180529_s6_soft", "path to dataset")
 #tf.flags.DEFINE_string("data_dir", "image_save20180504_expand", "path to dataset")
 #tf.flags.DEFINE_string("data_dir", "image_save20180510", "path to dataset")
 #The path to label the data belongs to  which logs.
@@ -151,6 +151,8 @@ def inference(image, keep_prob):
         W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
         b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
         conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=8)
+        #test of normal
+        conv_t3 = tf.nn.l2_normalize(conv_t3, dim = 3)
 
         annotation_pred_value = tf.cast(tf.subtract(tf.reduce_max(conv_t3,3),tf.reduce_min(conv_t3,3)),tf.int32)
         #annotation_pred_value = tf.argmax(conv_t3, dimension=3, name="prediction")
