@@ -42,7 +42,7 @@ tf.flags.DEFINE_string('mode', "all_visualize", "Mode train/ test/ visualize")
 
 tf.flags.DEFINE_string('heatmap', "T", "if generate heatmap")
 tf.flags.DEFINE_string('trans_heat', "T", "if generate translucent heatmap")
-tf.flags.DEFINE_string('fit_ellip', "F", "if generate fit ellipse")
+tf.flags.DEFINE_string('fit_ellip', "T", "if generate fit ellipse")
 tf.flags.DEFINE_string('anno', 'F', "if genererate anno")
 tf.flags.DEFINE_string('pred', 'T', "if check prediction")
 tf.flags.DEFINE_string('train_heat', 'F', 'if generate train heatmap')
@@ -280,12 +280,18 @@ def main(argv=None):
            os.makedirs(re_save_dir)
            print("Create '%s' successfully." % re_save_dir)
            logs_file.write("Create '%s' successfully.\n" % re_save_dir)
-       re_save_dir_im = os.path.join(re_save_dir, 'images')
+       re_save_dir_anno = os.path.join(re_save_dir, 'anno')
+       re_save_dir_pred = os.path.join(re_save_dir, 'pred')
+       re_save_dir_train_heat = os.path.join(re_save_dir, 'train_heat')
        re_save_dir_heat = os.path.join(re_save_dir, 'heatmap')
        re_save_dir_ellip = os.path.join(re_save_dir, 'ellip')
        re_save_dir_transheat = os.path.join(re_save_dir, 'transheat')
-       if not os.path.exists(re_save_dir_im):
-           os.makedirs(re_save_dir_im)
+       if not os.path.exists(re_save_dir_anno):
+           os.makedirs(re_save_dir_anno)
+       if not os.path.exists(re_save_dir_pred):
+           os.makedirs(re_save_dir_pred)
+       if not os.path.exists(re_save_dir_train_heat):
+           os.makedirs(re_save_dir_train_heat)
        if not os.path.exists(re_save_dir_heat):
            os.makedirs(re_save_dir_heat)
        if not os.path.exists(re_save_dir_ellip):
@@ -302,34 +308,33 @@ def main(argv=None):
            valid_images, valid_annotations, valid_filename, if_con, start, end=validation_dataset_reader.next_batch_valid(FLAGS.v_batch_size)
            pred_value, pred, logits_, pred_prob_=sess.run([pred_annotation_value,pred_annotation,logits, pred_prob],
                                                          feed_dict={image: valid_images, annotation: valid_annotations,keep_probability: 1.0})
-           valid_annotations = np.squeeze(valid_annotations, axis=3)
+           #valid_annotations = np.squeeze(valid_annotations, axis=3)
            pred = np.squeeze(pred, axis=3)
            pred_value=np.squeeze(pred_value,axis=3)
-
+           pred_ellip = np.argmax(pred_prob_+[0.85,0],axis=3)
            #label_predict_pixel
            for itr in range(len(pred)):
                filename = valid_filename[itr]['filename']
-           
-               #valid_images_ = anno_visualize(valid_images[itr].copy(), pred[itr])
-               #valid_images_ = soft_pred_visualize(valid_images_, valid_annotations[itr])
-               valid_images_ = soft_pred_visualize(valid_images[itr].copy(), pred_prob_[itr, :, :, 1])
-
-               #save result
-
-               utils.save_image(valid_images_.astype(np.uint8), re_save_dir_im, name="inp_" + filename)
-               #utils.save_image(valid_annotations[itr].astype(np.uint8), re_save_dir, name="gt_" + filename)
-               #utils.save_image(pred[itr].astype(np.uint8), re_save_dir, name="pred_" + filename)
-               #utils.save_image(pred_value[itr].astype(np.uint8), re_save_dir, name="heat_"+ filename)
+               if FLAGS.anno == 'T':
+                   valid_images_anno = anno_visualize(valid_images[itr].copy(), valid_annotations[itr,:,:,1])
+                   utils.save_image(valid_images_anno.astype(np.uint8), re_save_dir_anno, name="anno_" + filename)
+               if FLAGS.pred == 'T':
+                   valid_images_pred = pred_visualize(valid_images[itr].copy(), np.expand_dims(pred_ellip[itr], axis=2))
+                   utils.save_image(valid_images_pred.astype(np.uint8), re_save_dir_pred, name="pred_" + filename)
+               if FLAGS.train_heat == 'T':
+                   heat_map = density_heatmap(valid_annotations[itr, :, :, 1]/FLAGS.normal)
+                   utils.save_image(heat_map.astype(np.uint8), re_save_dir_train_heat, name="trainheat_" + filename)
+               
                if FLAGS.fit_ellip == 'T':
-                   valid_images_ellip=fit_ellipse_findContours(valid_images[itr].copy(),np.expand_dims(pred[itr],axis=2).astype(np.uint8))
-                   #valid_images_=fit_ellipse(valid_images[itr],np.expand_dims(pred[itr],axis=2).astype(np.uint8))
+                   valid_images_ellip=fit_ellipse_findContours(valid_images[itr].copy(),np.expand_dims(pred_ellip[itr],axis=2).astype(np.uint8))
                    utils.save_image(valid_images_ellip.astype(np.uint8), re_save_dir_ellip, name="ellip_" + filename)
                if FLAGS.heatmap == 'T':
                    heat_map = density_heatmap(pred_prob_[itr, :, :, 1])
                    utils.save_image(heat_map.astype(np.uint8), re_save_dir_heat, name="heat_" + filename)
                if FLAGS.trans_heat == 'T':
-                   trans_heat_map = translucent_heatmap(valid_images[itr], heat_map.astype(np.uint8).copy(), 0.5)
+                   trans_heat_map = translucent_heatmap(valid_images[itr], heat_map.astype(np.uint8).copy())
                    utils.save_image(trans_heat_map, re_save_dir_transheat, name="trans_heat_" + filename)
+
     elif FLAGS.mode == 'check_training':
        re_save_dir="%s%s" % (FLAGS.result_dir, datetime.datetime.now())
        logs_file.write("The result is save at file'%s'.\n" % re_save_dir)

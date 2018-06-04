@@ -11,7 +11,7 @@ from polar_trans import polar_transform_pixel
 root_dataset='/home/gp/repos/data'
 label_data_folder='fcn_anno'
 image_data_folder='train_data'
-image_save_folder='image_save20180530_soft_total'
+image_save_folder='image_save20180531_soft_s4'
 extend_rate=1.2
 resize_crop_sz=225
 part_num=200
@@ -84,8 +84,9 @@ for f in file_list:
         os.mkdir(gt_folder1)
     
     size=(resize_crop_sz,resize_crop_sz)
+
     
-    
+    ten_s =time.time()
     for i in range(l):
         s_time = time.time()
         print('gt[i][0]',gt[i][0])
@@ -118,15 +119,18 @@ for f in file_list:
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
             count = 0 
             for s in range(step):
-                off =(cv2.dilate(draw_im, kernel) - draw_im) * rate_pixel
-                draw_im = cv2.dilate(draw_im, kernel)
+                draw_im_n = cv2.dilate(draw_im, kernel)
+                off =(draw_im_n - draw_im) * rate_pixel
+                draw_im = draw_im_n
                 gt_im1 = gt_im1 + off        
             rate_pixel -=1
         
             for t in range(expand_num):
-                off =(cv2.dilate(draw_im, kernel) - draw_im) * rate_pixel
-                draw_im = cv2.dilate(draw_im, kernel)
-                gt_im1 = gt_im1 + off 
+                draw_im_n = cv2.dilate(draw_im, kernel)
+                #off =(draw_im_n - draw_im) * rate_pixel
+                #gt_im1 = gt_im1 + off 
+                gt_im1 = gt_im1 + (draw_im_n - draw_im)*rate_pixel
+                draw_im = draw_im_n
                 rate_pixel -= 1
         
             gt_im1 = np.expand_dims(gt_im1, axis=2)
@@ -140,7 +144,9 @@ for f in file_list:
             print(time_e)
         else:
             print("Skip %s" % img_name)
-        if i % 1000 == 0:
+        if i % 10 == 0:
+            print("the mean time is %g"%(time.time()-ten_s))
             print('Now is %d...' % i)
+            ten_s = time.time()
        
   

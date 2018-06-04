@@ -5,6 +5,7 @@ import tensorflow as tf
 import numpy as np
 import os
 import time
+import math
 import TensorflowUtils as utils
 import read_MITSceneParsingData as scene_parsing
 import datetime
@@ -20,13 +21,13 @@ tf.flags.DEFINE_integer("v_batch_size","12","batch size for validation")
 tf.flags.DEFINE_integer("temperature", "1", "The temperature use to train soft targets model")
 tf.flags.DEFINE_integer('normal', "255", "Use to normalize the label.")
 #THe path to save train model.
-tf.flags.DEFINE_string("logs_dir", "logs20180531_soft_total_c/", "path to logs directory")
+tf.flags.DEFINE_string("logs_dir", "logs20180530_soft_total_valid/", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs", "path to logs directory")
 #tf.flags.DEFINE_string("logs_dir", "logs_test", "path to logs directory")
 #The path to save segmentation result. 
 tf.flags.DEFINE_string("result_dir","result/","path to save the result")
 #The path to load the trian/validation data.
-tf.flags.DEFINE_string("data_dir", "image_save20180530_soft_total", "path to dataset")
+tf.flags.DEFINE_string("data_dir", "image_save20180530_soft_total_valid", "path to dataset")
 #the learning rate
 tf.flags.DEFINE_float("learning_rate", "1e-6", "Learning rate for Adam Optimizer")
 #tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer")
@@ -36,7 +37,13 @@ tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 tf.flags.DEFINE_bool('debug', "False", "Debug mode: True/ False")
 #The mode.
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
-
+#choose softmax threshold
+tf.flags.DEFINE_float('soft_thresh', '0.95', 'The value is used to find the soft targets threshhold which is foreground.')
+tf.flags.DEFINE_float('soft_thresh_lower', '0.9', 'The value is the lower thresh.' )
+tf.flags.DEFINE_float('soft_thresh_upper', '1', 'The value is the upper thresh.' )
+tf.flags.DEFINE_float('interval', '0.01', 'interval')
+tf.flags.DEFINE_float('w_iou', '0.8', 'The weight of iou accurary')
+tf.flags.DEFINE_float('s_t_learning_rate', '0.1', 'The rate to update soft_thresh')
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
@@ -174,11 +181,6 @@ def main(argv=None):
     #tf.summary.image("ground_truth", tf.cast(soft_annotation, tf.uint8), max_outputs=2)
     #tf.summary.image("pred_annotation", tf.cast(pred_annotation, tf.uint8), max_outputs=2)
     #logits:the last layer of conv net
-    #labels:the ground truth
-    #loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
-    #                                                                      labels=tf.squeeze(annotation, squeeze_dims=[3]),
-    #                                                                      name="entropy")))
-    #The update is not finished.?????????????????????????????????????!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     soft_logits = tf.nn.softmax(logits/FLAGS.temperature)
     soft_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits/FLAGS.temperature,
                                                                         labels = soft_annotation,
@@ -219,19 +221,21 @@ def main(argv=None):
 
     
     print("Setting up image reader...")
-    train_records, valid_records = scene_parsing.my_read_dataset(FLAGS.data_dir)
+    train_records, valid_records, test_records = scene_parsing.read_dataset_tvt(FLAGS.data_dir)
     print('number of train_records',len(train_records))
     print('number of valid_records',len(valid_records))
+    print('number of test records', len(test_records))
     with open(path_, 'a') as logs_file:
         logs_file.write('number of train_records %d\n' % len(train_records))
         logs_file.write('number of valid_records %d\n' % len(valid_records))
+        logs_file.write('number of test_records %d\n' % len(test_records))
 
     print("Setting up dataset reader")
     image_options = {'resize': True, 'resize_size': IMAGE_SIZE}
     if FLAGS.mode == 'train':
         train_dataset_reader = dataset_soft.BatchDatset(train_records, image_options)
-    validation_dataset_reader = dataset.BatchDatset(valid_records, image_options)
-
+        validation_dataset_reader = dataset_soft.BatchDatset(valid_records, image_options)
+    test_dataset_reader = dataset.BatchDatset(test_records, image_options)
     sess = tf.Session()
 
     print("Setting up Saver...")
@@ -266,39 +270,62 @@ def main(argv=None):
 
         if itr % 500 == 0:
             
-            #Caculate the accurary at the training set.
-            train_random_images, train_random_annotations = train_dataset_reader.get_random_batch_for_train(FLAGS.v_batch_size)
-            train_logits,train_loss,train_pred_anno = sess.run([soft_logits,soft_loss,pred_annotation], feed_dict={image:train_random_images,
-                                                                                        soft_annotation:train_random_annotations/FLAGS.normal,
+            #Caculate the accurary at the validation set.
+            valid_images, valid_annotations = valid_dataset_reader.get_records()
+            valid_logits,valid_loss,valid_pred_anno = sess.run([soft_logits,soft_loss,pred_annotation], feed_dict={image:valid_images,
+                                                                                        soft_annotation:valid_annotations/FLAGS.normal,
                                                                                         keep_probability:1.0})
             print('shape of train_random_annotations', train_random_annotations.shape)
             #Caculate accurary
-            accu_iou_,accu_pixel_ = accu.caculate_soft_accurary(train_logits, train_random_annotations/FLAGS.normal, 0.93)
-            print("%s ---> Training_loss: %g" % (datetime.datetime.now(), train_loss))
-            print("%s ---> Training_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel_))
-            print("%s ---> Training_iou_accuary: %g" % (datetime.datetime.now(),accu_iou_))
+            choose_len = math.ceil((FLAGS.soft_thresh_upper - FLAGS.soft_thresh_lower)/0.01)
+            test_thresh = FLAGS.soft_thresh_lower
+            accu_sum_max = -1
+            accu_iou_max = 0
+            accu_pixel_max = 0
+            choose_thresh = FLAGS.soft_thresh_lower
+            choose_thresh = test_thresh
+            print(choose_len)
+            for i in range(choose_len):
+                accu_iou_,accu_pixel_ = accu.caculate_soft_accurary(valid_logits, valid_annotations/FLAGS.normal, test_thresh)
+                accu_sum = accu_iou_*FLAGS.w_iou + accu_pixel_*(1-FLAGS.w_iou)
+                print('accu_sum: %g' % accu_sum)
+                if accu_sum>accu_sum_max:
+                    choose_thresh = test_thresh
+                    accu_sum_max = accu_sum
+                    accu_iou_max = accu_iou_
+                    accu_pixel_max = accu_pixel_
+                print('%d accu_iou:%g, accu_pixel:%g, accu_sum:%g, test_thresh:%g' % (i,accu_iou_max, accu_pixel_max,accu_sum_max,test_thresh))
+                test_thresh += FLAGS.interval
+            FLAGS.soft_thresh = choose_thresh
+            print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), train_loss))
+            print("%s ---> The chosen soft_threshhold is %g." % (datetime.datetime.now(),FLAGS.soft_thresh))
+            print("%s ---> Validation_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel_max))
+            print("%s ---> Validation_iou_accuary: %g" % (datetime.datetime.now(),accu_iou_max))
+
             print("---------------------------")
             #Output the logs.
             num_ = num_ + 1
             logs_file.write("No.%d the itr number is %d.\n" % (num_, itr))
-            logs_file.write("%s ---> Training_loss: %g.\n" % (datetime.datetime.now(), train_loss))
-            logs_file.write("%s ---> Training_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel_))
-            logs_file.write("%s ---> Training_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou_))
+            logs_file.write("%s ---> Validation_loss: %g.\n" % (datetime.datetime.now(), train_loss))
+            logs_file.write("%s ---> The chosen soft_threshhold is %g.\n" % (datetime.datetime.now(),FLAGS.soft_thresh))
+            logs_file.write("%s ---> Validation_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel_))
+            logs_file.write("%s ---> Validation_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou_))
             logs_file.write("---------------------------\n")
-
-            valid_images, valid_annotations = validation_dataset_reader.next_batch(FLAGS.v_batch_size)
-            valid_loss,pred_anno=sess.run([hard_loss,pred_annotation],feed_dict={image:valid_images,
-                                                                                      hard_annotation:valid_annotations,
+            
+            #test dataset
+            test_images, test_annotations = test_dataset_reader.next_batch(FLAGS.v_batch_size)
+            test_loss,pred_anno=sess.run([hard_loss,pred_annotation],feed_dict={image:test_images,
+                                                                                      hard_annotation:test_annotations,
                                                                                       keep_probability:1.0})
-            accu_iou,accu_pixel=accu.caculate_accurary(pred_anno,valid_annotations)
-            print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss))
-            print("%s ---> Validation_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel))
-            print("%s ---> Validation_iou_accuary: %g" % (datetime.datetime.now(),accu_iou))
+            accu_iou,accu_pixel=accu.caculate_soft_accurary(pred_anno, test_annotations, FLAGS.soft_thresh)
+            print("%s ---> test_loss: %g" % (datetime.datetime.now(), valid_loss))
+            print("%s ---> test_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel))
+            print("%s ---> test_iou_accuary: %g" % (datetime.datetime.now(),accu_iou))
 
             #Output the logs.
-            logs_file.write("%s ---> Validation_loss: %g.\n" % (datetime.datetime.now(), valid_loss))
-            logs_file.write("%s ---> Validation_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel))
-            logs_file.write("%s ---> Validation_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou))
+            logs_file.write("%s ---> test_loss: %g.\n" % (datetime.datetime.now(), valid_loss))
+            logs_file.write("%s ---> test_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel))
+            logs_file.write("%s ---> test_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou))
             saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr)
             #End the iterator
         logs_file.close()
