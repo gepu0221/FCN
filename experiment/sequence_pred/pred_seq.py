@@ -1,31 +1,30 @@
-#This is my FCN for sequence training first modified to add training set accurary calculation at 20180711.
+#This is my FCN for sequence predction first modified at 20180712.
 
 from __future__ import print_function
 import tensorflow as tf
 import numpy as np
-import os
-import sys
-#sys.path.append('../..')
 import time
+import os
 import TensorflowUtils as utils
 import read_data as scene_parsing
 import datetime
 import BatchReader as dataset
 import CaculateAccurary as accu
 from six.moves import xrange
-from label_pred import pred_visualize, anno_visualize, fit_ellipse,generate_heat_map,fit_ellipse_findContours
+from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
+from generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
+import shutil
 
 try:
-    from .cfgs.config_train import cfgs 
+    from .cfgs.config_pred import cfgs
 except Exception:
-    from cfgs.config_train import cfgs
-#sys.path.append('../..')
-#from label_pred import pred_visualize, anno_visualize, fit_ellipse,generate_heat_map,fit_ellipse_findContours
+    from cfgs.config_pred import cfgs
 
-MAX_ITERATION = cfgs.MAX_ITERATION
+MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
+
 NUM_OF_CLASSESS = cfgs.NUM_OF_CLASSESS
 IMAGE_SIZE = cfgs.IMAGE_SIZE
-MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
+
 
 def vgg_net(weights, image):
     layers = (
@@ -139,97 +138,63 @@ def inference(image, keep_prob):
         annotation_pred_value = tf.cast(tf.subtract(tf.reduce_max(conv_t3,3),tf.reduce_min(conv_t3,3)),tf.int32)
         #annotation_pred_value = tf.argmax(conv_t3, dimension=3, name="prediction")
         annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
+        pred_prob = tf.nn.softmax(conv_t3)
 
-    return tf.expand_dims(annotation_pred_value,dim=3),tf.expand_dims(annotation_pred, dim=3), conv_t3
+    return tf.expand_dims(annotation_pred_value,dim=3),tf.expand_dims(annotation_pred, dim=3), conv_t3, pred_prob
 
-
-def train(loss_val, var_list, learning_rate):
-    optimizer = tf.train.AdamOptimizer(learning_rate)
-    grads = optimizer.compute_gradients(loss_val, var_list=var_list)
-    if cfgs.debug:
-        # print(len(var_list))
-        for grad, var in grads:
-            utils.add_gradient_summary(grad, var)
-    return optimizer.apply_gradients(grads)
 
 
 def main(argv=None):
     keep_probability = tf.placeholder(tf.float32, name="keep_probabilty")
-    learning_rate = tf.placeholder(tf.float32, name="learning_rate")
     image = tf.placeholder(tf.float32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 7], name="input_image")
     annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")
 
-    pred_annotation_value, pred_annotation, logits = inference(image, keep_probability)
-    #tf.summary.image("input_image", image, max_outputs=2)
-    #tf.summary.image("ground_truth", tf.cast(annotation, tf.uint8), max_outputs=2)
-    #tf.summary.image("pred_annotation", tf.cast(pred_annotation, tf.uint8), max_outputs=2)
+    pred_annotation_value, pred_annotation, logits, pred_prob = inference(image, keep_probability)
+    tf.summary.image("input_image", image, max_outputs=2)
+    tf.summary.image("ground_truth", tf.cast(annotation, tf.uint8), max_outputs=2)
+    tf.summary.image("pred_annotation", tf.cast(pred_annotation, tf.uint8), max_outputs=2)
     #logits:the last layer of conv net
     #labels:the ground truth
     loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
                                                                           labels=tf.squeeze(annotation, squeeze_dims=[3]),
                                                                           name="entropy")))
-
-    valid_loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
-                                                                          labels=tf.squeeze(annotation, squeeze_dims=[3]),
-                                                                          name="valid_entropy")))
-   
-    tf.summary.scalar("train_loss", loss)
-    tf.summary.scalar("valid_loss", valid_loss)
-    tf.summary.scalar("learning_rate", learning_rate)
+    tf.summary.scalar("entropy", loss)
 
     trainable_var = tf.trainable_variables()
     if cfgs.debug:
         for var in trainable_var:
             utils.add_to_regularization_and_summary(var)
-    train_op = train(loss, trainable_var, learning_rate)
 
     print("Setting up summary op...")
     summary_op = tf.summary.merge_all()
-    
-    #Check if has the log file
-    if not os.path.exists(cfgs.logs_dir):
-        print("The logs path '%s' is not found" % cfgs.logs_dir)
-        print("Create now..")
-        os.makedirs(cfgs.logs_dir)
-        print("%s is created successfully!" % cfgs.logs_dir)
 
     #Create a file to write logs.
-    #filename='logs'+ cfgs.mode + str(datatime.datatime.now()) + '.txt'
+    #filename='logs'+ cfgs.mode + str(datetime.datetime.now()) + '.txt'
     filename="logs_%s%s.txt"%(cfgs.mode,datetime.datetime.now())
     path_=os.path.join(cfgs.logs_dir,filename)
-    with open(path_,'w') as logs_file:
-        logs_file.write("The logs file is created at %s.\n" % datetime.datetime.now())
-        logs_file.write("The model is ---%s---.\n" % cfgs.logs_dir)
-        logs_file.write("The mode is %s\n"% (cfgs.mode))
-        logs_file.write("The train data batch size is %d and the validation batch size is %d\n."%(cfgs.batch_size,cfgs.v_batch_size))
-        logs_file.write("The train data is %s.\n" % (cfgs.data_dir))
-        logs_file.write("The data size is %d and the MAX_ITERATION is %d.\n" % (IMAGE_SIZE, MAX_ITERATION))
-        logs_file.write("Setting up image reader...")
-
+    logs_file=open(path_,'w')
+    logs_file.write("The logs file is created at %s\n" % datetime.datetime.now())
+    logs_file.write("The mode is %s\n"% (cfgs.mode))
+    logs_file.write("The train data batch size is %d and the validation batch size is %d.\n"%(cfgs.batch_size,cfgs.v_batch_size))
+    logs_file.write("The train data is %s.\n" % (cfgs.data_dir))
+    logs_file.write("The model is ---%s---.\n" % cfgs.logs_dir )
     
     print("Setting up image reader...")
+    logs_file.write("Setting up image reader...\n")
     train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
     print('number of train_records',len(train_records))
     print('number of valid_records',len(valid_records))
-    with open(path_, 'a') as logs_file:
-        logs_file.write('number of train_records %d\n' % len(train_records))
-        logs_file.write('number of valid_records %d\n' % len(valid_records))
-
-    path_lr = cfgs.learning_rate_path
-    with open(path_lr, 'r') as f:
-        lr_ = float(f.readline().split('\n')[0])
-
+    logs_file.write('number of train_records %d\n' % len(train_records))
+    logs_file.write('number of valid_records %d\n' % len(valid_records))
 
     print("Setting up dataset reader")
     vis = True if cfgs.mode == 'all_visualize' else False
     image_options = {'resize': True, 'resize_size': IMAGE_SIZE, 'visualize': vis}
-
+        
     if cfgs.mode == 'train':
         train_dataset_reader = dataset.BatchDatset(train_records, image_options)
-   
     validation_dataset_reader = dataset.BatchDatset(valid_records, image_options)
-    #save current train itr from stopping(init = 0)
-    current_itr_var = tf.Variable(0, dtype=tf.int32, name='current_itr')
+
     sess = tf.Session()
 
     print("Setting up Saver...")
@@ -243,69 +208,92 @@ def main(argv=None):
         saver.restore(sess, ckpt.model_checkpoint_path)
         print("Model restored...")
 
-    num_=0
-    current_itr = current_itr_var.eval(sess)
-    for itr in xrange(current_itr, MAX_ITERATION):
-        '''
-        with open(path_lr, 'r') as f:
-            lr_ = float(f.readline().split('\n')[0])
-        '''
-        train_images, train_annotations = train_dataset_reader.next_batch(cfgs.batch_size)
-        feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85, learning_rate: lr_}
         
-
-        sess.run(train_op, feed_dict=feed_dict)
-        logs_file = open(path_, 'a')  
-        if itr % 10 == 0:
-            train_loss, summary_str = sess.run([loss, summary_op], feed_dict=feed_dict)
-            print("Step: %d, Train_loss:%g" % (itr, train_loss))
-            summary_writer.add_summary(summary_str, itr)
-
-        if itr % 100 == 0:
-            
-            #Caculate the accurary at the training set.
-            train_random_images, train_random_annotations = train_dataset_reader.get_random_batch_for_train(cfgs.v_batch_size)
-            train_loss,train_pred_anno = sess.run([loss,pred_annotation], feed_dict={image:train_random_images,
-                                                                                        annotation:train_random_annotations,
-                                                                                        keep_probability:1.0})
-            accu_iou_,accu_pixel_ = accu.caculate_accurary(train_pred_anno, train_random_annotations)
-            print('learining_rate: %g' % lr_)
-            print("%s ---> Training_loss: %g" % (datetime.datetime.now(), train_loss))
-            print("%s ---> Training_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel_))
-            print("%s ---> Training_iou_accuary: %g" % (datetime.datetime.now(),accu_iou_))
-            print("---------------------------")
-            #Output the logs.
-            num_ = num_ + 1
-            logs_file.write("No.%d the itr number is %d.\n" % (num_, itr))
-            logs_file.write("%s ---> Training_loss: %g.\n" % (datetime.datetime.now(), train_loss))
-            logs_file.write("%s ---> Training_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel_))
-            logs_file.write("%s ---> Training_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou_))
-            logs_file.write("---------------------------\n")
-
-            valid_images, valid_annotations = validation_dataset_reader.next_batch(cfgs.v_batch_size)
-            #valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
-                                                       #keep_probability: 1.0})
-            valid_loss_,pred_anno=sess.run([valid_loss,pred_annotation],feed_dict={image:valid_images,
+    if cfgs.mode == "accurary":
+        count=0
+        if_con=True
+        accu_iou_t=0
+        accu_pixel_t=0
+        
+        while if_con:
+            count=count+1
+            valid_images, valid_annotations, valid_filenames, if_con, start, end=validation_dataset_reader.next_batch_valid(cfgs.v_batch_size)
+            valid_loss,pred_anno=sess.run([loss,pred_annotation],feed_dict={image:valid_images,
                                                                                       annotation:valid_annotations,
                                                                                       keep_probability:1.0})
             accu_iou,accu_pixel=accu.caculate_accurary(pred_anno,valid_annotations)
-            print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss_))
+            print("Ture %d ---> the data from %d to %d" % (count, start, end))
             print("%s ---> Validation_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel))
             print("%s ---> Validation_iou_accuary: %g" % (datetime.datetime.now(),accu_iou))
+            #Output logs.
+            logs_file.write("Ture %d ---> the data from %d to %d\n" % (count, start, end))
+            logs_file.write("%s ---> Validation_pixel_accuary: %g\n" % (datetime.datetime.now(),accu_pixel))
+            logs_file.write("%s ---> Validation_iou_accuary: %g\n" % (datetime.datetime.now(),accu_iou))
 
-            #Output the logs.
-            logs_file.write("%s ---> Validation_loss: %g.\n" % (datetime.datetime.now(), valid_loss_))
-            logs_file.write("%s ---> Validation_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel))
-            logs_file.write("%s ---> Validation_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou))
+            accu_iou_t=accu_iou_t+accu_iou
+            accu_pixel_t=accu_pixel_t+accu_pixel
+        print("%s ---> Total validation_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel_t/count))
+        print("%s ---> Total validation_iou_accuary: %g" % (datetime.datetime.now(),accu_iou_t/count))
+        #Output logs
+        logs_file.write("%s ---> Total validation_pixel_accurary: %g\n" % (datetime.datetime.now(),accu_pixel_t/count))
+        logs_file.write("%s ---> Total validation_iou_accurary: %g\n" % (datetime.datetime.now(),accu_iou_t/count))
+
+    elif cfgs.mode == "all_visualize":
+           
+        re_save_dir="%s%s" % (cfgs.result_dir, datetime.datetime.now())
+        logs_file.write("The result is save at file'%s'.\n" % re_save_dir)
+        logs_file.write("The number of part visualization is %d.\n" % cfgs.v_batch_size)
+       
+        #Check the result path if exists.
+        if not os.path.exists(re_save_dir):
+            print("The path '%s' is not found." % re_save_dir)
+            print("Create now ...")
+            os.makedirs(re_save_dir)
+            print("Create '%s' successfully." % re_save_dir)
+            logs_file.write("Create '%s' successfully.\n" % re_save_dir)
+       
+        re_save_dir_im = os.path.join(re_save_dir, 'images')
+        re_save_dir_heat = os.path.join(re_save_dir, 'heatmap')
+        re_save_dir_ellip = os.path.join(re_save_dir, 'ellip')
+        re_save_dir_transheat = os.path.join(re_save_dir, 'transheat')
+        if not os.path.exists(re_save_dir_im):
+            os.makedirs(re_save_dir_im)
+        if not os.path.exists(re_save_dir_heat):
+            os.makedirs(re_save_dir_heat)
+        if not os.path.exists(re_save_dir_ellip):
+            os.makedirs(re_save_dir_ellip)
+        if not os.path.exists(re_save_dir_transheat):
+            os.makedirs(re_save_dir_transheat)
+
+        count=0
+        if_con=True
+        accu_iou_t=0
+        accu_pixel_t=0
+       
+        while if_con:
+            count=count+1
+            valid_images, valid_annotaions, valid_filename, valid_cur_images, if_con, start, end=validation_dataset_reader.next_batch_val_vis(cfgs.v_batch_size)
+            pred_value, pred, logits_, pred_prob_=sess.run([pred_annotation_value, pred_annotation, logits, pred_prob],feed_dict={image: valid_images, keep_probability: 1.0})
+            print("Turn %d :----start from %d ------- to %d" % (count, start, end))
+            pred = np.squeeze(pred, axis=3)
+            pred_value=np.squeeze(pred_value,axis=3)
+
+ 
+            for itr in range(len(pred)):
+                filename = valid_filename[itr]['filename']
+                valid_images_ = pred_visualize(valid_cur_images[itr].copy(), pred[itr])
+                utils.save_image(valid_images_.astype(np.uint8), re_save_dir_im, name="inp_" + filename)
             
-            #record current itr
-            sess.run(tf.assign(current_itr_var, itr))
-            saver.save(sess, cfgs.logs_dir + "model.ckpt", itr)
-            #End the iterator
-        if itr % 10000 == 0 and itr > 0:
-            lr_ = lr_/10
-            print('learning rate change from %g to %g' %(lr_*10, lr_))
-            logs_file.write('learning rate change from %g to %g\n' %(lr_*10, lr_))
-        logs_file.close()
+                if cfgs.fit_ellip:
+                    #valid_images_ellip=fit_ellipse_findContours_ori(valid_images[itr].copy(),np.expand_dims(pred[itr],axis=2).astype(np.uint8))
+                    valid_images_ellip=fit_ellipse_findContours(valid_cur_images[itr].copy(),np.expand_dims(pred[itr],axis=2).astype(np.uint8))
+                    utils.save_image(valid_images_ellip.astype(np.uint8), re_save_dir_ellip, name="ellip_" + filename)
+                if cfgs.heatmap:
+                    heat_map = density_heatmap(pred_prob_[itr, :, :, 1])
+                    utils.save_image(heat_map.astype(np.uint8), re_save_dir_heat, name="heat_" + filename)
+                if cfgs.trans_heat:
+                    trans_heat_map = translucent_heatmap(valid_cur_images[itr], heat_map.astype(np.uint8).copy())
+                    utils.save_image(trans_heat_map, re_save_dir_transheat, name="trans_heat_" + filename)
+   
 if __name__ == "__main__":
     tf.app.run()

@@ -70,13 +70,13 @@ def main():
             raise Exception('No file %s found' % gt_file)
         total_seq_list.extend(read_one_file(gt_file, args.seq_num))
     
-    random.shuffle(total_seq_list)        
+    #random.shuffle(total_seq_list)        
     
     total_num = len(total_seq_list)
-    test_num = int(0.1 * total_num)
-    train_num = total_num - test_num
-    train_records = total_seq_list[0:train_num]
-    test_records = total_seq_list[train_num:]
+    train_num = int(0 * total_num)
+    test_num = total_num - train_num
+    test_records = total_seq_list[0:test_num]
+    train_records = total_seq_list[test_num:]
     print('The number of train_records is %d and test_records is %d' % (train_num, test_num))
     train_file = '%s_%s' % ('train', args.out_seq_name)
     train_out_seq_file = os.path.join(args.result_path, train_file )

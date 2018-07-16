@@ -1,11 +1,9 @@
-#This is my FCN for sequence training first modified to add training set accurary calculation at 20180711.
+#This is my FCN for sequence training using focal loss first modified to add training set accurary calculation at 20180711.
 
 from __future__ import print_function
 import tensorflow as tf
 import numpy as np
 import os
-import sys
-#sys.path.append('../..')
 import time
 import TensorflowUtils as utils
 import read_data as scene_parsing
@@ -16,11 +14,9 @@ from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse,generate_heat_map,fit_ellipse_findContours
 
 try:
-    from .cfgs.config_train import cfgs 
+    from .cfgs.config_focal import cfgs 
 except Exception:
-    from cfgs.config_train import cfgs
-#sys.path.append('../..')
-#from label_pred import pred_visualize, anno_visualize, fit_ellipse,generate_heat_map,fit_ellipse_findContours
+    from cfgs.config_focal import cfgs
 
 MAX_ITERATION = cfgs.MAX_ITERATION
 NUM_OF_CLASSESS = cfgs.NUM_OF_CLASSESS
@@ -160,14 +156,22 @@ def main(argv=None):
     annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")
 
     pred_annotation_value, pred_annotation, logits = inference(image, keep_probability)
-    #tf.summary.image("input_image", image, max_outputs=2)
-    #tf.summary.image("ground_truth", tf.cast(annotation, tf.uint8), max_outputs=2)
-    #tf.summary.image("pred_annotation", tf.cast(pred_annotation, tf.uint8), max_outputs=2)
     #logits:the last layer of conv net
     #labels:the ground truth
-    loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
-                                                                          labels=tf.squeeze(annotation, squeeze_dims=[3]),
-                                                                          name="entropy")))
+    
+    at = float(cfgs.at)
+    a_w = (1- 2*at) * tf.cast(tf.squeeze(annotation, squeeze_dims=[3]), tf.float32) + at
+    
+
+    pro = tf.nn.softmax(logits)
+     
+    loss_weight = tf.pow(1-tf.reduce_sum(pro * tf.one_hot(tf.squeeze(annotation, squeeze_dims=[3]), cfgs.NUM_OF_CLASSESS), 3), cfgs.gamma)
+     
+    
+    loss = tf.reduce_mean(loss_weight * a_w * tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
+                                                                                       labels=tf.squeeze(annotation, squeeze_dims=[3]),
+                                                                                       name="entropy"))
+
 
     valid_loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
                                                                           labels=tf.squeeze(annotation, squeeze_dims=[3]),
@@ -202,7 +206,6 @@ def main(argv=None):
         logs_file.write("The model is ---%s---.\n" % cfgs.logs_dir)
         logs_file.write("The mode is %s\n"% (cfgs.mode))
         logs_file.write("The train data batch size is %d and the validation batch size is %d\n."%(cfgs.batch_size,cfgs.v_batch_size))
-        logs_file.write("The train data is %s.\n" % (cfgs.data_dir))
         logs_file.write("The data size is %d and the MAX_ITERATION is %d.\n" % (IMAGE_SIZE, MAX_ITERATION))
         logs_file.write("Setting up image reader...")
 
@@ -222,7 +225,7 @@ def main(argv=None):
 
     print("Setting up dataset reader")
     vis = True if cfgs.mode == 'all_visualize' else False
-    image_options = {'resize': True, 'resize_size': IMAGE_SIZE, 'visualize': vis}
+    image_options = {'resize': True, 'resize_size': IMAGE_SIZE, 'visualize': vis, 'annotation':True}
 
     if cfgs.mode == 'train':
         train_dataset_reader = dataset.BatchDatset(train_records, image_options)
@@ -245,12 +248,18 @@ def main(argv=None):
 
     num_=0
     current_itr = current_itr_var.eval(sess)
+    print('itr\tmode\tlr_\tacc\tiou_acc\tloss')
+    time_begin = time.time()
+    valid_time = 100
     for itr in xrange(current_itr, MAX_ITERATION):
-        '''
+        
         with open(path_lr, 'r') as f:
             lr_ = float(f.readline().split('\n')[0])
-        '''
-        train_images, train_annotations = train_dataset_reader.next_batch(cfgs.batch_size)
+        
+        train_images, train_annotations, if_finish, epoch_no= train_dataset_reader.next_batch(cfgs.batch_size)
+        if if_finish:
+            print('Epochs%d finished, time comsumed:%.5f' % (epoch_no, time.time()-time_begin))
+            time_begin = time.time()
         feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85, learning_rate: lr_}
         
 
@@ -258,54 +267,45 @@ def main(argv=None):
         logs_file = open(path_, 'a')  
         if itr % 10 == 0:
             train_loss, summary_str = sess.run([loss, summary_op], feed_dict=feed_dict)
-            print("Step: %d, Train_loss:%g" % (itr, train_loss))
+            print('%d\t%s\t%g\t%s\t%s\t%.6f' % (itr, 'train',lr_, 'None','None',train_loss))
             summary_writer.add_summary(summary_str, itr)
 
-        if itr % 100 == 0:
-            
+        if itr % valid_time == 0:
+            with open('time_to_valid.txt', 'r') as f:
+                valid_time = int(f.readline().split('\n')[0])
+
+
             #Caculate the accurary at the training set.
             train_random_images, train_random_annotations = train_dataset_reader.get_random_batch_for_train(cfgs.v_batch_size)
             train_loss,train_pred_anno = sess.run([loss,pred_annotation], feed_dict={image:train_random_images,
                                                                                         annotation:train_random_annotations,
                                                                                         keep_probability:1.0})
             accu_iou_,accu_pixel_ = accu.caculate_accurary(train_pred_anno, train_random_annotations)
-            print('learining_rate: %g' % lr_)
-            print("%s ---> Training_loss: %g" % (datetime.datetime.now(), train_loss))
-            print("%s ---> Training_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel_))
-            print("%s ---> Training_iou_accuary: %g" % (datetime.datetime.now(),accu_iou_))
-            print("---------------------------")
+            print('%d\t%s\t%g\t%.5f\t%.5f\t%.6f' % (itr, 'train', lr_, accu_pixel_, accu_iou_, train_loss))
             #Output the logs.
             num_ = num_ + 1
-            logs_file.write("No.%d the itr number is %d.\n" % (num_, itr))
-            logs_file.write("%s ---> Training_loss: %g.\n" % (datetime.datetime.now(), train_loss))
-            logs_file.write("%s ---> Training_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel_))
-            logs_file.write("%s ---> Training_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou_))
-            logs_file.write("---------------------------\n")
+            logs_file.write('%d\t%s\t%g\t%.5f\t%.5f\t%.6f\n' % (itr, 'train', lr_, accu_pixel_, accu_iou_, train_loss))
 
-            valid_images, valid_annotations = validation_dataset_reader.next_batch(cfgs.v_batch_size)
+            valid_images, valid_annotations, _, _= validation_dataset_reader.next_batch(cfgs.v_batch_size)
             #valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
                                                        #keep_probability: 1.0})
-            valid_loss_,pred_anno=sess.run([valid_loss,pred_annotation],feed_dict={image:valid_images,
+            valid_loss_,pred_anno=sess.run([loss,pred_annotation],feed_dict={image:valid_images,
                                                                                       annotation:valid_annotations,
                                                                                       keep_probability:1.0})
             accu_iou,accu_pixel=accu.caculate_accurary(pred_anno,valid_annotations)
-            print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss_))
-            print("%s ---> Validation_pixel_accuary: %g" % (datetime.datetime.now(),accu_pixel))
-            print("%s ---> Validation_iou_accuary: %g" % (datetime.datetime.now(),accu_iou))
-
+            print('%d\t%s\t%g\t%.5f\t%.5f\t%.6f' % (itr, 'valid', lr_, accu_pixel, accu_iou, valid_loss_))
             #Output the logs.
-            logs_file.write("%s ---> Validation_loss: %g.\n" % (datetime.datetime.now(), valid_loss_))
-            logs_file.write("%s ---> Validation_pixel_accuary: %g.\n" % (datetime.datetime.now(),accu_pixel))
-            logs_file.write("%s ---> Validation_iou_accuary: %g.\n" % (datetime.datetime.now(),accu_iou))
-            
+            logs_file.write('%d\t%s\t%g\t%.5f\t%.5f\t%.6f\n' % (itr, 'train', lr_, accu_pixel, accu_iou, valid_loss_))
+
             #record current itr
             sess.run(tf.assign(current_itr_var, itr))
             saver.save(sess, cfgs.logs_dir + "model.ckpt", itr)
             #End the iterator
+        '''
         if itr % 10000 == 0 and itr > 0:
             lr_ = lr_/10
             print('learning rate change from %g to %g' %(lr_*10, lr_))
-            logs_file.write('learning rate change from %g to %g\n' %(lr_*10, lr_))
+            logs_file.write('learning rate change from %g to %g\n' %(lr_*10, lr_))'''
         logs_file.close()
 if __name__ == "__main__":
     tf.app.run()
