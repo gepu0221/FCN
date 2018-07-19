@@ -7,7 +7,9 @@ import os
 import TensorflowUtils as utils
 import read_data as scene_parsing
 import datetime
-import BatchReader as dataset
+import pdb
+#import BatchReader_multi as dataset
+from BatchReader_multi import get_data_from_filelist
 import CaculateAccurary as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
@@ -26,32 +28,40 @@ IMAGE_SIZE = cfgs.IMAGE_SIZE
 
 class FCNNet(object):
 
-    def __init__(self, mode, max_epochs, batch_size, n_classes, train_records, valid_records, im_sz, init_lr):
+    def __init__(self, mode, max_epochs, batch_size, n_classes, train_records, valid_records, im_sz, init_lr, keep_prob):
         self.max_epochs = max_epochs
+        self.keep_prob = keep_prob
         self.batch_size = batch_size
         self.NUM_OF_CLASSESS = n_classes
         self.IMAGE_SIZE = im_sz
         self.graph = tf.get_default_graph()
         self.learning_rate = tf.placeholder(dtype=tf.int32, name='learning_rate')
+        self.anno_accu = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1], name='accu_anno')
         self.learning_rate = init_lr
         self.mode = mode
         self.logs_dir = cfgs.logs_dir
-        self.current_itr_var = tf.Variable(0, dtype=tf.int32, name='current_itr')
-        self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch')
+        self.current_itr_var = tf.Variable(0, dtype=tf.int32, name='current_itr', trainable=True)
+        #self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch', trainable=False)
 
         vis = True if self.mode == 'all_visualize' else False
         if_anno = True if self.mode == 'train' else False
         self.image_options = {'resize': True, 'resize_size':self.IMAGE_SIZE, 'visualize':vis, 'annotation': if_anno}
         self.train_records = train_records
         self.valid_records = valid_records
+        #self.images = tf.placeholder(tf.float32, [None, None, None], name="input_image")
+
+        #self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, None], name="input_image")
+        #self.annotations = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1], name="annotation")
+
+        
 
     def get_data(self):
         with tf.device('/cpu:0'):
-            train_dataset_reader = dataset.BatchDatset(self.train_records, self.image_options)
-            valid_dataset_reader = dataset.BatchDatset(self.valid_records, self.image_options)
+            #train_dataset_reader = dataset.BatchDatset(self.train_records, self.image_options)
+            #valid_dataset_reader = dataset.BatchDatset(self.valid_records, self.image_options)
 
-            self.train_images, self.train_annotations, _,_, self.train_init = train_dataset_reader.get_data_from_filelist(self.batch_size, 'get_data_train')
-            self.valid_images, self.valid_annotations, _,_, self.valid_init = valid_dataset_reader.get_data_from_filelist(self.batch_size, 'get_data_valid')
+            self.images, self.annotations, _, self.train_init = get_data_from_filelist(self.train_records, self.batch_size, 'get_data_train')
+            self.images, self.annotations, _, self.valid_init = get_data_from_filelist(self.valid_records, self.batch_size, 'get_data_valid')
 
 
     def vgg_net(self, weights, image):
@@ -84,8 +94,6 @@ class FCNNet(object):
                 current = utils.conv2d_basic(current, kernels, bias)
             elif kind == 'relu':
                 current = tf.nn.relu(current, name=name)
-                if cfgs.debug:
-                    utils.add_activation_summary(current)
             elif kind == 'pool':
                 current = utils.avg_pool_2x2(current)
             net[name] = current
@@ -113,11 +121,11 @@ class FCNNet(object):
         with tf.variable_scope("inference"):
             W1 = utils.weight_variable([3, 3, 7, 64], name="W1")
             b1 = utils.bias_variable([64], name="b1")
-            conv1 = utils.conv2d_basic(self.train_images, W1, b1)
+            conv1 = utils.conv2d_basic(self.images, W1, b1)
             relu1 = tf.nn.relu(conv1, name='relu1')
             
             #pretrain
-            image_net = vgg_net(weights, relu1)
+            image_net = self.vgg_net(weights, relu1)
             
             conv_final_layer = image_net["conv5_3"]
 
@@ -127,16 +135,15 @@ class FCNNet(object):
             b6 = utils.bias_variable([4096], name="b6")
             conv6 = utils.conv2d_basic(pool5, W6, b6)
             relu6 = tf.nn.relu(conv6, name="relu6")
-            if cfgs.debug:
-                utils.add_activation_summary(relu6)
             relu_dropout6 = tf.nn.dropout(relu6, keep_prob=keep_prob)
 
             W7 = utils.weight_variable([1, 1, 4096, 4096], name="W7")
             b7 = utils.bias_variable([4096], name="b7")
             conv7 = utils.conv2d_basic(relu_dropout6, W7, b7)
             relu7 = tf.nn.relu(conv7, name="relu7")
+            '''
             if cfgs.debug:
-                utils.add_activation_summary(relu7)
+                utils.add_activation_summary(relu7)'''
             relu_dropout7 = tf.nn.dropout(relu7, keep_prob=keep_prob)
 
             W8 = utils.weight_variable([1, 1, 4096, NUM_OF_CLASSESS], name="W8")
@@ -157,7 +164,7 @@ class FCNNet(object):
             conv_t2 = utils.conv2d_transpose_strided(fuse_1, W_t2, b_t2, output_shape=tf.shape(image_net["pool3"]))
             fuse_2 = tf.add(conv_t2, image_net["pool3"], name="fuse_2")
 
-            shape = tf.shape(image)
+            shape = tf.shape(self.images)
             deconv_shape3 = tf.stack([shape[0], shape[1], shape[2], NUM_OF_CLASSESS])
             W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
             b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
@@ -168,48 +175,47 @@ class FCNNet(object):
             annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
 
         self.pred_annotation_value = tf.expand_dims(annotation_pred_value,dim=3)
-        self.pred_annotaiton = tf.expand_dims(annotation_pred, dim=3)
+        self.pred_annotation = tf.expand_dims(annotation_pred, dim=3)
         self.logits = conv_t3
 
 
-    def train_op(self, var_list):
-        optimizer = tf.train.AdamOptimizer(self.learning_rate)
+    def train_optimizer(self):
+        var_list = tf.trainable_variables()
+        self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+        '''
         grads = optimizer.compute_gradients(self.loss, var_list=var_list)
         if cfgs.debug:
-            # print(len(var_list))
             for grad, var in grads:
                 utils.add_gradient_summary(grad, var)
-        self.train_op = optimizer.apply_gradients(grads)
+        self.train_op = optimizer.apply_gradients(grads)'''
 
     def loss(self):
         self.loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
-                                                                          labels=tf.squeeze(self.train_annotation, squeeze_dims=[3]),
+                                                                          labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                           name="entropy")))
 
         self.valid_loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
-                                                                          labels=tf.squeeze(self.valid_annotation, squeeze_dims=[3]),
+                                                                          labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                           name="valid_entropy")))
-    def calculate_acc(self, annotations):
-        self.accu_iou, self.accu = accu.caculate_accurary(self.pred_annotation, annotations)
+    #def calculate_acc(self):
+    #   self.accu_iou, self.accu = accu.caculate_accurary(self.pred_annotation, self.anno_accu)
     
     def summary(self):
         with tf.name_scope('summary'):
             tf.summary.scalar('train_loss', self.loss)
             tf.summary.scalar('valid_loss', self.valid_loss)
-            tf.summary.scalar('acc', self.accu_pixel)
-            tf.summary.scalar('iou_acc', self.accu_iou)
+            #tf.summary.scalar('acc', self.accu_pixel)
+            #tf.summary.scalar('iou_acc', self.accu_iou)
             tf.summary.scalar('learning_rate', self.learning_rate)
             self.summary_op = tf.summary.merge_all()
-
-        pass
 
     def build(self):
         #bulid the graph
         self.get_data()
-        self.inference()
+        self.inference(self.keep_prob)
         self.loss()
-        self.train_op()
-        self.calculate_acc()
+        self.train_optimizer()
+        #self.calculate_acc()
         self.summary()
 
     def try_update_lr(self):
@@ -224,28 +230,34 @@ class FCNNet(object):
 
     def recover_model(self, sess):
         saver = tf.train.Saver()
-        ckpt = tf.train.get_checkpoint_path(self.logs_dir)
-        if ckpt and ckpt.model_checkpotin_path:
+        ckpt = tf.train.get_checkpoint_state(self.logs_dir)
+        if ckpt and ckpt.model_checkpoint_path:
             saver.restore(sess, ckpt.model_checkpoint_path)
             print('Model restore finished')
-        else:
-            pass
+        
+        return saver
 
     #Evaluate all validation dataset once 
+    
     def valid_once(self, sess, writer, epoch, step):
         sess.run(self.valid_init)
 
         count = 0
         sum_acc = 0
         sum_acc_iou = 0
+        acc =1
+        acc_iou=1
         t0 = time.time()
 
         try:
             total_loss = 0
             while True:
                 count +=1
+                images_, anno, _ = self.valid_init.get_next()
+                print('image.shape', tf.shape(images_))
+                #summary_str, loss, acc, acc_iou= sess.run(fetches=[self.summary_op, self.valid_loss, self.accu, self.accu_iou], feed_dict={self.anno_accu: self.valid_annotations, self.images:images_, self.annotations:anno})
+                summary_str, loss= sess.run(fetches=[self.summary_op, self.valid_loss], feed_dict={self.images:images_, self.annotations:anno})
 
-                summary_str, loss, acc, acc_iou = sess.run(fetches=[self.summary_op, self.valid_loss, self.accu, self.accu_iou])
 
                 writer.add_summary(summary, global_step=step)
                 sum_acc += acc
@@ -257,8 +269,10 @@ class FCNNet(object):
             print('epoch %5d\t learning_rate = %g\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy%.2%%' % 
             (epoch, self.learning_rate, total_loss/count, sum_acc/count, sum_acc_iou/count))
             print('Take time %3.1f' % (time.time() - t0))
-            pass
+    
 
+    
+    
     def train_one_epoch(self, sess, writer, epoch, step):
         sess.run(self.train_init)
         sum_acc = 0
@@ -266,25 +280,28 @@ class FCNNet(object):
         count = 0
         total_loss = 0
         t0 =time.time()
+        acc = 1
+        acc_iou =1
         try:
             while True:
                 step += 1
                 count += 1
 
-                _, summary_str, loss, acc, acc_iou = sess.run(
-                fetches=[self.train_op, self.summary_op, self.loss, self.accu, self.accu_iou],
-                feed_dict={self.learning_rate: self.learning_rate})
-
+                
+                #_, summary_str, loss, acc, acc_iou= sess.run(
+                #fetches=[self.train_op, self.summary_op, self.loss, self.accu, self.accu_iou],
+                _, summary_str, loss = sess.run(
+                fetches=[self.train_op, self.summary_op, self.loss])
                 sum_acc += acc
                 sum_acc_iou += acc_iou
                 total_loss += loss
                 time_consumed = time.time() - t0
                 time_pre_batch = time_consumed/count
+                print(loss)
 
         except tf.errors.OutOfRangeError:
             count -= 1
-            print('epoch %5d\t learning_rate = %g\t loss = %.3f\t train_accuracy = %.2f%%\t train_iou_accuracy%.2%%' % 
-            (epoch, self.learning_rate, total_loss/count, sum_acc/count, sum_acc_iou/count))
+            print('epoch %5d\t learning_rate = %g\t loss = %.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
             print('Take time %3.1f' % (time.time() - t0))
             pass
         return step
@@ -301,22 +318,25 @@ class FCNNet(object):
         writer = tf.summary.FileWriter(logdir=self.logs_dir, graph=self.graph)
 
         print('The graph path is %s' % self.logs_dir)
-        config = tf.ConfigProto(log_device_placement=False, allow_soft_palcement=True)
+        config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+        #config = tf.ConfigProto(log_device_placement=False, allow_soft_palcement=True)
         with tf.device('/gpu:0'):
             with tf.Session(config=config) as sess:
                 #1. initialize all variables
                 sess.run(tf.global_variables_initializer())
 
                 #2. Try to recover model
-                saver = tf.recover_model(sess)
-                step = self.current_itr_var.eval()
-                cur_epoch = self.epoch()
+                saver = self.recover_model(sess)
+                step = 0
+                #step = self.current_itr_var.eval()
+                #cur_epoch = self.cur_epoch.eval()
+                cur_epoch = 1
 
                 #3. start to train 
                 for epoch in range(cur_epoch, self.max_epochs + 1):
                     
                     #3.1 try to change learning rate
-                    self.try_update_lf()
+                    self.try_update_lr()
                     if epoch != 0 and epoch % 20 == 0:
                         self.learning_rate /= 10
                         pass
@@ -325,27 +345,22 @@ class FCNNet(object):
                     step = self.train_one_epoch(sess, writer, epoch, step)
 
                     #3.3 save model
-                    self.valid_once(sess, writer, epoch, step)
+                    #self.valid_once(sess, writer, epoch, step)
+                    #sess.run(tf.assign(self.cur_epoch, epoch))
+                    #self.current_itr_val.load(step, sess)
                     saver.save(sess, self.logs_dir + 'model.ckpt', step)
-        
 
         writer.close()
 
 def main(useless_argv):
+    train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+ 
     with tf.device('/gpu:0'):
-        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
-        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr)
+        #train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
         model.build()
         model.train()
 
 if __name__ == '__main__':
     tf.app.run()
 
-                  
-   
-
-
-
-        
-
-        
