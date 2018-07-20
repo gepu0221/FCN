@@ -3,13 +3,14 @@ from __future__ import print_function
 import tensorflow as tf
 import numpy as np
 import time
+import math
 import os
 import TensorflowUtils as utils
 import read_data as scene_parsing
 import datetime
 import pdb
 #import BatchReader_multi as dataset
-from BatchReader_multi import get_data_from_filelist
+from BatchReader_multi import get_data_
 import CaculateAccurary as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
@@ -41,17 +42,13 @@ class FCNNet(object):
         self.mode = mode
         self.logs_dir = cfgs.logs_dir
         self.current_itr_var = tf.Variable(0, dtype=tf.int32, name='current_itr', trainable=True)
-        #self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch', trainable=False)
+        self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch', trainable=False)
 
         vis = True if self.mode == 'all_visualize' else False
         if_anno = True if self.mode == 'train' else False
         self.image_options = {'resize': True, 'resize_size':self.IMAGE_SIZE, 'visualize':vis, 'annotation': if_anno}
         self.train_records = train_records
         self.valid_records = valid_records
-        #self.images = tf.placeholder(tf.float32, [None, None, None], name="input_image")
-
-        #self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, None], name="input_image")
-        #self.annotations = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1], name="annotation")
 
         
 
@@ -60,8 +57,9 @@ class FCNNet(object):
             #train_dataset_reader = dataset.BatchDatset(self.train_records, self.image_options)
             #valid_dataset_reader = dataset.BatchDatset(self.valid_records, self.image_options)
 
-            self.images, self.annotations, _, self.train_init = get_data_from_filelist(self.train_records, self.batch_size, 'get_data_train')
-            self.images, self.annotations, _, self.valid_init = get_data_from_filelist(self.valid_records, self.batch_size, 'get_data_valid')
+            #self.images, self.annotations, _, self.train_init = get_data_from_filelist(self.train_records, self.batch_size, 'get_data_train')
+            #self.images, self.annotations, _, self.valid_init = get_data_from_filelist(self.valid_records, self.batch_size, 'get_data_valid')
+            self.images, self.annotations, _, self.train_init, self.valid_init = get_data_(self.train_records, self.valid_records, self.batch_size)
 
 
     def vgg_net(self, weights, image):
@@ -112,16 +110,17 @@ class FCNNet(object):
         model_data = utils.get_model_data(cfgs.model_dir, MODEL_URL)
 
         mean = model_data['normalization'][0][0][0]
-        mean_pixel = np.mean(mean, axis=(0, 1))
-
+        mean_pixel = np.mean(mean)
+        self.mean_ = mean_pixel
         weights = np.squeeze(model_data['layers'])
 
-        #processed_image = utils.process_image(image, mean_pixel)
+        processed_image = utils.process_image(self.images, mean_pixel)
 
         with tf.variable_scope("inference"):
             W1 = utils.weight_variable([3, 3, 7, 64], name="W1")
             b1 = utils.bias_variable([64], name="b1")
-            conv1 = utils.conv2d_basic(self.images, W1, b1)
+            #conv1 = utils.conv2d_basic(self.images, W1, b1)
+            conv1 = utils.conv2d_basic(processed_image, W1, b1)
             relu1 = tf.nn.relu(conv1, name='relu1')
             
             #pretrain
@@ -170,11 +169,8 @@ class FCNNet(object):
             b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
             conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=8)
 
-            annotation_pred_value = tf.cast(tf.subtract(tf.reduce_max(conv_t3,3),tf.reduce_min(conv_t3,3)),tf.int32)
-            #annotation_pred_value = tf.argmax(conv_t3, dimension=3, name="prediction")
             annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
 
-        self.pred_annotation_value = tf.expand_dims(annotation_pred_value,dim=3)
         self.pred_annotation = tf.expand_dims(annotation_pred, dim=3)
         self.logits = conv_t3
 
@@ -197,8 +193,10 @@ class FCNNet(object):
         self.valid_loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                           labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                           name="valid_entropy")))
-    #def calculate_acc(self):
-    #   self.accu_iou, self.accu = accu.caculate_accurary(self.pred_annotation, self.anno_accu)
+    def calculate_acc(self):
+        with tf.name_scope('accu'):
+            pass
+    
     
     def summary(self):
         with tf.name_scope('summary'):
@@ -253,20 +251,21 @@ class FCNNet(object):
             total_loss = 0
             while True:
                 count +=1
-                images_, anno, _ = self.valid_init.get_next()
-                print('image.shape', tf.shape(images_))
                 #summary_str, loss, acc, acc_iou= sess.run(fetches=[self.summary_op, self.valid_loss, self.accu, self.accu_iou], feed_dict={self.anno_accu: self.valid_annotations, self.images:images_, self.annotations:anno})
-                summary_str, loss= sess.run(fetches=[self.summary_op, self.valid_loss], feed_dict={self.images:images_, self.annotations:anno})
+                summary_str, loss= sess.run(fetches=[self.summary_op, self.valid_loss])
 
 
-                writer.add_summary(summary, global_step=step)
+                writer.add_summary(summary_str, global_step=step)
                 sum_acc += acc
                 sum_acc_iou += acc_iou
                 total_loss += loss
+                print('\r' + 32 * ' ', end='')
+                print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
+
 
         except tf.errors.OutOfRangeError:
             count -= 1
-            print('epoch %5d\t learning_rate = %g\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy%.2%%' % 
+            print('epoch %5d\t learning_rate = %g\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%' % 
             (epoch, self.learning_rate, total_loss/count, sum_acc/count, sum_acc_iou/count))
             print('Take time %3.1f' % (time.time() - t0))
     
@@ -286,24 +285,31 @@ class FCNNet(object):
             while True:
                 step += 1
                 count += 1
+                _, summary_str, loss, anno_, images_ = sess.run(
+                fetches=[self.train_op, self.summary_op, self.loss, self.annotations, self.images])
+                if math.isnan(loss) or math.isinf(loss):
+                    print('loss is ', loss)
+                    img = images[0]
+                    img = img + self.mean_
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(os.path.join('image', 'loss ' + str(loss) + ' ' + str(step) + '.jpg'), img)
+                    continue
 
-                
-                #_, summary_str, loss, acc, acc_iou= sess.run(
-                #fetches=[self.train_op, self.summary_op, self.loss, self.accu, self.accu_iou],
-                _, summary_str, loss = sess.run(
-                fetches=[self.train_op, self.summary_op, self.loss])
                 sum_acc += acc
                 sum_acc_iou += acc_iou
                 total_loss += loss
                 time_consumed = time.time() - t0
                 time_pre_batch = time_consumed/count
-                print(loss)
+                print('\r' + 32 * ' ', end='')
+                print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t mean_loss=%.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, step, loss, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
+
+
 
         except tf.errors.OutOfRangeError:
             count -= 1
-            print('epoch %5d\t learning_rate = %g\t loss = %.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
+            print('epoch %5d\t learning_rate = %g\t mean_loss = %.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
             print('Take time %3.1f' % (time.time() - t0))
-            pass
+     
         return step
 
     def train(self):
@@ -327,10 +333,9 @@ class FCNNet(object):
 
                 #2. Try to recover model
                 saver = self.recover_model(sess)
-                step = 0
-                #step = self.current_itr_var.eval()
-                #cur_epoch = self.cur_epoch.eval()
-                cur_epoch = 1
+                step = self.current_itr_var.eval()
+                cur_epoch = self.cur_epoch.eval()
+                print(self.current_itr_var.eval())
 
                 #3. start to train 
                 for epoch in range(cur_epoch, self.max_epochs + 1):
@@ -345,18 +350,17 @@ class FCNNet(object):
                     step = self.train_one_epoch(sess, writer, epoch, step)
 
                     #3.3 save model
-                    #self.valid_once(sess, writer, epoch, step)
-                    #sess.run(tf.assign(self.cur_epoch, epoch))
-                    #self.current_itr_val.load(step, sess)
+                    self.valid_once(sess, writer, epoch, step)
+                    self.cur_epoch.load(epoch, sess)
+                    self.current_itr_var.load(step, sess)
                     saver.save(sess, self.logs_dir + 'model.ckpt', step)
 
         writer.close()
 
 def main(useless_argv):
-    train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
  
     with tf.device('/gpu:0'):
-        #train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
         model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
         model.build()
         model.train()

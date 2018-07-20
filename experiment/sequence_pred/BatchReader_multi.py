@@ -3,9 +3,11 @@ import numpy
 import tensorflow as tf
 import scipy.misc as misc
 import os
+import random
 import pdb
 import time
-
+import cv2
+import read_data as scene_parsing
 
 try:
     from .cfgs.config_data import cfgs 
@@ -77,8 +79,11 @@ def transform_anno(filename):
 
 
 
-def _read_images_list(files):
+def _read_images_list(files, shuffle=True):
     
+    if shuffle:
+        random.shuffle(files)
+
     #seq, cur, anno, filename
     seq_images = [item['seq'] for item in files]
     cur_images = [item['current'] for item in files]
@@ -86,8 +91,6 @@ def _read_images_list(files):
     annotations = [item['annotation'] for item in files]
    
     filenames =  [item['filename'] for item in files]
-
-
     data = tf.data.Dataset.from_tensor_slices((seq_images, cur_images, annotations, filenames))
 
     return data
@@ -130,4 +133,38 @@ def get_data_from_filelist(files, batch_size, variable_scope_name='get_data'):
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
     return fuse_im_batch, anno_im_batch, filename_batch, data_init
-    #return data_init
+
+def get_data_(train_files, valid_files, batch_size, variable_scope_name='get_data'):
+    
+    with tf.variable_scope(variable_scope_name) as var_scope:
+        train_data = _read_images_list(train_files)
+        valid_data = _read_images_list(valid_files)
+
+        n_cpu_cores = os.cpu_count()
+        
+        #train
+        train_list = train_data.map(_parse_record, num_parallel_calls=n_cpu_cores)
+        train_batch = train_list.batch(batch_size)
+        #valid
+        valid_list = valid_data.map(_parse_record, num_parallel_calls=n_cpu_cores)
+        valid_batch = valid_list.batch(batch_size)
+
+        train_batch = train_batch.prefetch(5)
+        valid_batch = valid_batch.prefetch(5)
+
+        iterator = tf.data.Iterator.from_structure(train_batch.output_types, train_batch.output_shapes) 
+        
+        train_init = iterator.make_initializer(train_batch, name='train_init')
+        valid_init = iterator.make_initializer(valid_batch, name='valid_init')
+
+        fuse_im_batch, anno_im_batch, filename_batch = iterator.get_next()
+        im_size = int(image_options['resize_size'])
+        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
+        anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
+        filename_batch.set_shape([batch_size])
+    return fuse_im_batch, anno_im_batch, filename_batch, train_init, valid_init
+ 
+if __name__=='__main__':
+    train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+    train_data = _read_images_list(train_records)
+
