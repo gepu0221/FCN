@@ -5,6 +5,7 @@ import numpy as np
 import time
 import math
 import os
+import cv2
 import TensorflowUtils as utils
 import read_data as scene_parsing
 import datetime
@@ -37,7 +38,6 @@ class FCNNet(object):
         self.IMAGE_SIZE = im_sz
         self.graph = tf.get_default_graph()
         self.learning_rate = tf.placeholder(dtype=tf.int32, name='learning_rate')
-        self.anno_accu = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1], name='accu_anno')
         self.learning_rate = init_lr
         self.mode = mode
         self.logs_dir = cfgs.logs_dir
@@ -193,10 +193,15 @@ class FCNNet(object):
         self.valid_loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                           labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                           name="valid_entropy")))
-    def calculate_acc(self):
+    def calculate_acc(self, pred_anno, anno):
         with tf.name_scope('accu'):
-            pass
-    
+            self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
+           
+    def eval(self):
+        with tf.name_scope('eval'):
+            is_correct = tf.equal(tf.cast(self.pred_annotation, tf.int32), self.annotations)
+            sum_ = tf.cast(tf.reduce_sum(tf.cast(is_correct, tf.int32)), tf.float32)
+            self.acc = tf.multiply(sum_, 100/(self.IMAGE_SIZE*self.IMAGE_SIZE*self.batch_size))
     
     def summary(self):
         with tf.name_scope('summary'):
@@ -213,6 +218,7 @@ class FCNNet(object):
         self.inference(self.keep_prob)
         self.loss()
         self.train_optimizer()
+        self.eval()
         #self.calculate_acc()
         self.summary()
 
@@ -243,21 +249,22 @@ class FCNNet(object):
         count = 0
         sum_acc = 0
         sum_acc_iou = 0
-        acc =1
-        acc_iou=1
         t0 = time.time()
 
         try:
             total_loss = 0
             while True:
+                print('valid.....')
                 count +=1
-                #summary_str, loss, acc, acc_iou= sess.run(fetches=[self.summary_op, self.valid_loss, self.accu, self.accu_iou], feed_dict={self.anno_accu: self.valid_annotations, self.images:images_, self.annotations:anno})
-                summary_str, loss= sess.run(fetches=[self.summary_op, self.valid_loss])
-
-
+                _, summary_str, loss, acc= sess.run(
+                fetches=[self.train_op, self.summary_op, self.loss, self.acc])
+                #pdb.set_trace()
                 writer.add_summary(summary_str, global_step=step)
+                #self.calculate_acc(self.pred_annotation.eval(), self.annotations.eval())
+                #sum_acc += self.accu
+                #sum_acc_iou += self.accu_iou
                 sum_acc += acc
-                sum_acc_iou += acc_iou
+                sum_acc_iou +=1
                 total_loss += loss
                 print('\r' + 32 * ' ', end='')
                 print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
@@ -279,29 +286,30 @@ class FCNNet(object):
         count = 0
         total_loss = 0
         t0 =time.time()
-        acc = 1
-        acc_iou =1
+        mean_acc = 0
+        mean_acc_iou = 0
         try:
             while True:
                 step += 1
                 count += 1
-                _, summary_str, loss, anno_, images_ = sess.run(
-                fetches=[self.train_op, self.summary_op, self.loss, self.annotations, self.images])
-                if math.isnan(loss) or math.isinf(loss):
-                    print('loss is ', loss)
-                    img = images[0]
-                    img = img + self.mean_
-                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                    cv2.imwrite(os.path.join('image', 'loss ' + str(loss) + ' ' + str(step) + '.jpg'), img)
-                    continue
-
+                _, summary_str, loss, acc = sess.run(
+                fetches=[self.train_op, self.summary_op, self.loss, self.acc])
+                '''    
+                if count % 10 ==0:           
+                    #pdb.set_trace()
+                    self.calculate_acc(self.pred_annotation.eval(), self.annotations.eval())
+                    #pdb.set_trace()
+                    sum_acc += self.accu
+                    sum_acc_iou += self.accu_iou
+                    mean_acc = sum_acc/count*10
+                    mean_acc_iou = sum_acc_iou/count*10'''
                 sum_acc += acc
-                sum_acc_iou += acc_iou
+                mean_acc = sum_acc/count
                 total_loss += loss
                 time_consumed = time.time() - t0
-                time_pre_batch = time_consumed/count
-                print('\r' + 32 * ' ', end='')
-                print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t mean_loss=%.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, step, loss, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
+                time_per_batch = time_consumed/count
+                print('\r' + 12 * ' ', end='')
+                print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t mean_loss=%.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%\t time = %.2f' % (epoch, self.learning_rate, step, loss, (total_loss/count), mean_acc, mean_acc_iou, time_per_batch))
 
 
 
@@ -361,6 +369,8 @@ def main(useless_argv):
  
     with tf.device('/gpu:0'):
         train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print(len(train_records))
+        print(len(valid_records))
         model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
         model.build()
         model.train()
