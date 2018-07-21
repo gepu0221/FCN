@@ -1,5 +1,5 @@
 #Multithreading batchreader for sequence FCN first modifed on 20180712.
-import numpy 
+import numpy as np 
 import tensorflow as tf
 import scipy.misc as misc
 import os
@@ -13,7 +13,7 @@ try:
     from .cfgs.config_train_m import cfgs 
 except Exception:
     from cfgs.config_train_m import cfgs
-image_options = {'resize':True, 'resize_size':cfgs.IMAGE_SIZE}
+image_options = {'resize':False, 'resize_size':cfgs.IMAGE_SIZE}
 
     #fuse current frame with sequence 
 def fuse_seq(cur_filename, seq_set_filename):
@@ -27,8 +27,6 @@ def fuse_seq(cur_filename, seq_set_filename):
 
 def transform_misc(filename):
     image = misc.imread(filename)
-    if len(image.shape) < 3:  # make sure images are of shape(h,w,3)
-        image = np.array([image for i in range(3)])
 
     if image_options.get("resize", False) and image_options["resize"]:
         resize_size = int(image_options["resize_size"])
@@ -36,7 +34,7 @@ def transform_misc(filename):
     else:
         resize_image = image
 
-    return np.array(resize_image)
+    return np.array([resize_image])
 
 
 def transform_rgb(filename):
@@ -67,12 +65,12 @@ def transform_gray(filename):
 def transform_anno(filename):
     image = tf.read_file(filename)
     image = tf.image.decode_jpeg(image, channels=1)
-        
+    
     if image_options.get("resize", False) and image_options["resize"]:
         resize_size = int(image_options["resize_size"])
         resize_image = tf.image.resize_bilinear([image], size=[resize_size, resize_size])[0]
     else:
-        resize_image = gray_image
+        resize_image = image
 
     return resize_image
 
@@ -249,6 +247,19 @@ def get_data_video(video_files, batch_size, variable_scope_name='get_data_video'
  
 
 if __name__=='__main__':
-    train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
-    train_data = _read_images_list(train_records)
+    filename = tf.placeholder(dtype=tf.string, name='filename') 
+    im_an = transform_anno(filename)
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        im_ = sess.run([im_an], feed_dict={filename:'s2img00308.jpg'})
+        #print(im_)
+        cv2.imwrite('get_an.jpg', im_[0])
+
+
+    im_m = transform_misc('s2img00308.jpg')
+    print(im_m)
+    cv2.imwrite('get_m_an.jpg', im_m)
+
+
 
