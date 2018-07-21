@@ -11,7 +11,7 @@ import read_data as scene_parsing
 import datetime
 import pdb
 #import BatchReader_multi as dataset
-from BatchReader_multi import get_data_
+from BatchReader_multi import get_data_, get_data_vis, get_data_video
 import CaculateAccurary as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
@@ -50,17 +50,22 @@ class FCNNet(object):
         self.train_records = train_records
         self.valid_records = valid_records
 
+        if self.mode == 'visualize' or 'video_vis':
+            self.result_dir = self.result_dir
+
         
 
     def get_data(self):
         with tf.device('/cpu:0'):
-            #train_dataset_reader = dataset.BatchDatset(self.train_records, self.image_options)
-            #valid_dataset_reader = dataset.BatchDatset(self.valid_records, self.image_options)
+            self.images, self.annotations, self.filenames, self.train_init, self.valid_init = get_data_(self.train_records, self.valid_records, self.batch_size)
+    
+    def get_data_vis(self):
+        with tf.device('/cpu:0'):
+            self.images, self.cur_ims, self.annotations, self.filenames, self.vis_init = get_data_vis(self.valid_records, self.batch_size)
 
-            #self.images, self.annotations, _, self.train_init = get_data_from_filelist(self.train_records, self.batch_size, 'get_data_train')
-            #self.images, self.annotations, _, self.valid_init = get_data_from_filelist(self.valid_records, self.batch_size, 'get_data_valid')
-            self.images, self.annotations, _, self.train_init, self.valid_init = get_data_(self.train_records, self.valid_records, self.batch_size)
-
+    def get_data_video(self):
+        with tf.decice('/cpu:0'):
+            self.images, self.cur_ims, self.flienaems, self.video_init = get_data_video(self.valid_records, self.batch_size)
 
     def vgg_net(self, weights, image):
         layers = (
@@ -178,12 +183,6 @@ class FCNNet(object):
     def train_optimizer(self):
         var_list = tf.trainable_variables()
         self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
-        '''
-        grads = optimizer.compute_gradients(self.loss, var_list=var_list)
-        if cfgs.debug:
-            for grad, var in grads:
-                utils.add_gradient_summary(grad, var)
-        self.train_op = optimizer.apply_gradients(grads)'''
 
     def loss(self):
         self.loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
@@ -193,15 +192,18 @@ class FCNNet(object):
         self.valid_loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                           labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                           name="valid_entropy")))
+    
     def calculate_acc(self, pred_anno, anno):
         with tf.name_scope('accu'):
             self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
-           
+    
+    #not use
     def eval(self):
         with tf.name_scope('eval'):
             is_correct = tf.equal(tf.cast(self.pred_annotation, tf.int32), self.annotations)
             sum_ = tf.cast(tf.reduce_sum(tf.cast(is_correct, tf.int32)), tf.float32)
             self.acc = tf.multiply(sum_, 100/(self.IMAGE_SIZE*self.IMAGE_SIZE*self.batch_size))
+
     
     def summary(self):
         with tf.name_scope('summary'):
@@ -218,9 +220,17 @@ class FCNNet(object):
         self.inference(self.keep_prob)
         self.loss()
         self.train_optimizer()
-        self.eval()
-        #self.calculate_acc()
         self.summary()
+
+    def build_vis(self):
+        #bulid the visualize graph
+        self.get_data_vis()
+        self.inference(self.keep_prob)
+
+    def build_video(self):
+        #build the video graph
+        self.get_data_video()
+        self.inference(self.keep_prob)
 
     def try_update_lr(self):
         try:
@@ -241,8 +251,88 @@ class FCNNet(object):
         
         return saver
 
+    def create_re_dir(self):
+        re_save_dir="%s%s" % (self.result_dir, datetime.datetime.now())
+
+        self.re_save_dir_im = os.path.join(self.re_save_dir, 'images')
+        self.re_save_dir_heat = os.path.join(self.re_save_dir, 'heatmap')
+        self.re_save_dir_ellip = os.path.join(self.re_save_dir, 'ellip')
+        self.re_save_dir_transheat = os.path.join(self.re_save_dir, 'transheat')
+        if not os.path.exists(self.re_save_dir_im):
+            os.makedirs(self.re_save_dir_im)
+        if not os.path.exists(self.re_save_dir_heat):
+            os.makedirs(self.re_save_dir_heat)
+        if not os.path.exists(self.re_save_dir_ellip):
+            os.makedirs(self.re_save_dir_ellip)
+        if not os.path.exists(self.re_save_dir_transheat):
+            os.makedirs(self.re_save_dir_transheat)
+
+     def vis_one_im(self):
+        if cfgs.anno:
+            im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
+            utils.save_image(im, self.re_save_dir_im, name='inp_' + self.flename + '.jpg')
+        if cfgs.fit_ellip:
+            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
+            utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + .'jpg')
+        if cfgs.heatmap:
+            heat_map = density_heatmap(self.vis_pred_prob)
+            utils.save_image(heat_map, self.re_save_dir_heat, name='heat_' + self.filename + '.jpg')
+        if cfgs.trains_heat and cfgs.heatmap:
+            trans_heat_map = translucent_heatmap(self.vis_image.copy(), heat_map.astype(np.uint8).copy())
+            utils.save_image(trans_heat_map, self.re_save_dir_transheat, name='trans_heat_' + self.filenaem + '.jpg')
+
+    #Visualize the result
+    def visualize(self):
+        sess.run(self.vis_init)
+        
+        self.create_re_dir()
+
+        count = 0
+        t0 = time.time()
+
+        try:
+            total_loss = 0
+            while True:
+                count += 1
+                images_, annos_, cur_ims, filenames_, pred_anno, pred_prob = sess.run([self.images, self.annotations, self.cur_ims, self.filenames, self.pred_annotation, self.logits])
+                pred_anno = np.squeeze(pred_anno, axis=3)
+
+                for i in range(len(pred_anno)):
+                    self.filename = filenames_[i]
+                    self.vis_image = cur_ims_[i]
+                    self.vis_anno = annos_[i]
+                    self.vis_pred = pred_anno[i]
+                    self.vis_pred_prob = pred_prob[i]
+
+                    self.vis_one_im()
+                    
+    #Visualize the video result
+    def vis_video(self):
+        sess.run(self.video_init)
+        
+        self.create_re_dir()
+
+        count = 0
+        t0 = time.time()
+
+        try:
+            total_loss = 0
+            while True:
+                count += 1
+                images_, cur_ims, filenames_, pred_anno, pred_prob = sess.run([self.images, self.cur_ims, self.filenames, self.pred_annotation, self.logits])
+                pred_anno = np.squeeze(pred_anno, axis=3)
+
+                for i in range(len(pred_anno)):
+                    self.filename = filenames_[i]
+                    self.vis_image = cur_ims_[i]
+                    self.vis_pred = pred_anno[i]
+                    self.vis_pred_prob = pred_prob[i]
+
+                    self.vis_one_im()
+                    
+
+
     #Evaluate all validation dataset once 
-    
     def valid_once(self, sess, writer, epoch, step):
         sess.run(self.valid_init)
 
@@ -254,17 +344,13 @@ class FCNNet(object):
         try:
             total_loss = 0
             while True:
-                print('valid.....')
                 count +=1
-                _, summary_str, loss, acc= sess.run(
-                fetches=[self.train_op, self.summary_op, self.loss, self.acc])
-                #pdb.set_trace()
+                images_, annos_, pred_anno, summary_str, loss= sess.run(
+                fetches=[self.images, self.annotations, self.pred_annotation, self.summary_op, self.loss])
                 writer.add_summary(summary_str, global_step=step)
-                #self.calculate_acc(self.pred_annotation.eval(), self.annotations.eval())
-                #sum_acc += self.accu
-                #sum_acc_iou += self.accu_iou
-                sum_acc += acc
-                sum_acc_iou +=1
+                self.calculate_acc(pred_anno, annos_)
+                sum_acc += self.accu
+                sum_acc_iou += self.accu_iou
                 total_loss += loss
                 print('\r' + 32 * ' ', end='')
                 print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
@@ -292,26 +378,33 @@ class FCNNet(object):
             while True:
                 step += 1
                 count += 1
-                _, summary_str, loss, acc = sess.run(
-                fetches=[self.train_op, self.summary_op, self.loss, self.acc])
-                '''    
-                if count % 10 ==0:           
-                    #pdb.set_trace()
-                    self.calculate_acc(self.pred_annotation.eval(), self.annotations.eval())
-                    #pdb.set_trace()
-                    sum_acc += self.accu
-                    sum_acc_iou += self.accu_iou
-                    mean_acc = sum_acc/count*10
-                    mean_acc_iou = sum_acc_iou/count*10'''
-                sum_acc += acc
+                #1. train
+                images_, annos_, pred_anno, _, summary_str, loss = sess.run(
+                fetches=[self.images, self.annotations, self.pred_annotation, self.train_op, self.summary_op, self.loss],
+                feed_dict={self.learning_rate: self.learning_rate})
+
+                #2. calculate accurary
+                self.calculate_acc(pred_anno, annos_)
+                sum_acc += self.accu
+                sum_acc_iou += self.accu_iou
                 mean_acc = sum_acc/count
+                mean_acc_iou = sum_acc_iou/count
+
+                #3. calculate loss
                 total_loss += loss
+
+                #4. time consume
                 time_consumed = time.time() - t0
                 time_per_batch = time_consumed/count
+
+                #5. check if change learning rate
+                if count % 100 == 0:
+                    self.try_update_lr()
+
+
+                #5. print
                 print('\r' + 12 * ' ', end='')
                 print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t mean_loss=%.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%\t time = %.2f' % (epoch, self.learning_rate, step, loss, (total_loss/count), mean_acc, mean_acc_iou, time_per_batch))
-
-
 
         except tf.errors.OutOfRangeError:
             count -= 1
@@ -369,12 +462,32 @@ def main(useless_argv):
  
     with tf.device('/gpu:0'):
         train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
-        print(len(train_records))
-        print(len(valid_records))
+        print('The number of train records is %d and valid records is %d.' % (len(train_records), len(valid_records)))
         model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
         model.build()
         model.train()
 
+def vis_main(useless_argv):
+    with tf.device('/gpu:0'):
+        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print('The number of valid records is %d.' %  len(valid_records))
+        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
+        model.build_vis()
+        model.visualize()
+
+def video_main(useless_argv):
+    with tf.device('/gpu:0'):
+        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print('The number of video records is %d.' %  len(valid_records))
+        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
+        model.build_video()
+        model.vis_video()
+
 if __name__ == '__main__':
-    tf.app.run()
+    if cfgs.mode == 'train':
+        main()
+    elif cfgs.mode == 'visualize'
+        vis_main()
+    elif cfgs.mode == 'vis_video':
+        video_main()
 

@@ -10,9 +10,9 @@ import cv2
 import read_data as scene_parsing
 
 try:
-    from .cfgs.config_data import cfgs 
+    from .cfgs.config_train_m import cfgs 
 except Exception:
-    from cfgs.config_data import cfgs
+    from cfgs.config_train_m import cfgs
 image_options = {'resize':True, 'resize_size':cfgs.IMAGE_SIZE}
 
     #fuse current frame with sequence 
@@ -26,7 +26,6 @@ def fuse_seq(cur_filename, seq_set_filename):
     return frame
 
 def transform_misc(filename):
-    #print('image_name',filename)
     image = misc.imread(filename)
     if len(image.shape) < 3:  # make sure images are of shape(h,w,3)
         image = np.array([image for i in range(3)])
@@ -78,7 +77,7 @@ def transform_anno(filename):
     return resize_image
 
 
-
+#----------Read list Begin------------
 def _read_images_list(files, shuffle=True):
     
     if shuffle:
@@ -95,75 +94,160 @@ def _read_images_list(files, shuffle=True):
 
     return data
 
+def _read_video_list(files, shuffle=True):
+    
+    if shuffle:
+        ramdom.shuffle(files)
+
+    #seq, cur, filename
+    seq_images = [item['seq'] for item in files]
+    cur_images = [item['current'] for item in files]
+    filenames = [item['filename'] for item in files]
+
+    data = tf.data.Dataset.from_tensor_slices((seq_images, cur_images, filenames))
+
+    return data
+#----------------Read List End----------------
+
+#----------------Parse List Begin-------------
 def _parse_record(seq_filename_set, cur_filename, anno_filename, filename):
     
     #fuse sequence
-
     fuse_im = fuse_seq(cur_filename, seq_filename_set)
-    #fuse_im = transform_rgb(cur_filename)
     fuse_im = tf.cast(fuse_im, tf.float32)
-    print('fuse_im', tf.shape(fuse_im))
     #get annotation
-    #anno_im = tf.cast(transform_gray(anno_filename), tf.int32)
     anno_im = tf.cast(transform_anno(anno_filename), tf.int32)
-    print('anno_im', tf.shape(anno_im))
     return fuse_im, anno_im, filename
 
+def _parse_vis_record(seq_filename_set, cur_filename, anno_filename, filename):
+    #fuse sequence
+    fuse_im = fuse_seq(cur_filename, seq_filename_set)
+    fuse_im = tf.cast(fuse_im, tf.float32)
+    #current frame
+    cur_im = transform_rgb(cur_filename)
+    #get annotation
+    anno_im = tf.cast(transform_anno(anno_filename), tf.int32)
+
+    return fuse_im, cur_im, anno_im, filename
+
+#parse video data without annotations
+def _parse_video_record(seq_filename_set, cur_filename, filename):
     
-
-def get_data_from_filelist(files, batch_size, variable_scope_name='get_data'):
+    #fuse sequence
+    fuse_im = fuse_seq(cur_filename, seq_filename_set)
+    fuse_im = tf.cast(fues_im, tf.float32)
+    #current frame
+    cur_im = transform_rgb(cur_filename)
     
-    with tf.variable_scope(variable_scope_name) as var_scope:
-        data = _read_images_list(files)
-
-        n_cpu_cores = os.cpu_count()
-
-        data_list = data.map(_parse_record, num_parallel_calls=n_cpu_cores)
-        data_batch = data_list.batch(batch_size)
-
-        data_batch = data_batch.prefetch(5)
-
-        iterator = tf.data.Iterator.from_structure(data_batch.output_types, data_batch.output_shapes) 
-        print(data_batch.output_types, data_batch.output_shapes)
-        data_init = iterator.make_initializer(data_batch, name='data_init')
-        
-        fuse_im_batch, anno_im_batch, filename_batch = iterator.get_next()
-        im_size = int(image_options['resize_size'])
-        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
-        anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
-        filename_batch.set_shape([batch_size])
-    return fuse_im_batch, anno_im_batch, filename_batch, data_init
+    return fuse_im, cur_im, filename
 
 def get_data_(train_files, valid_files, batch_size, variable_scope_name='get_data'):
     
     with tf.variable_scope(variable_scope_name) as var_scope:
+
+        #1. read data list from records
         train_data = _read_images_list(train_files)
         valid_data = _read_images_list(valid_files)
 
+        #2. read image through map(), and batch the dataset
         n_cpu_cores = os.cpu_count()
         
         #train
-        train_list = train_data.map(_parse_record, num_parallel_calls=n_cpu_cores)
+        train_list = train_data.map(_parse_record, num_parallel_calls=n_cpu_cores) # each item of train data is the param of fun _parse_record
         train_batch = train_list.batch(batch_size)
         #valid
         valid_list = valid_data.map(_parse_record, num_parallel_calls=n_cpu_cores)
         valid_batch = valid_list.batch(batch_size)
-
+        
+        #3. prefetch
         train_batch = train_batch.prefetch(5)
         valid_batch = valid_batch.prefetch(5)
 
+        #4. create iterator
         iterator = tf.data.Iterator.from_structure(train_batch.output_types, train_batch.output_shapes) 
-        
+        #4.1 initialize different iterator
         train_init = iterator.make_initializer(train_batch, name='train_init')
         valid_init = iterator.make_initializer(valid_batch, name='valid_init')
-
+        
+        #5. fetch and return
         fuse_im_batch, anno_im_batch, filename_batch = iterator.get_next()
+
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
+
     return fuse_im_batch, anno_im_batch, filename_batch, train_init, valid_init
+
+def get_data_vis(vis_files, batch_size, variable_scope_name='get_data'):
+    
+    with tf.variable_scope(variable_scope_name) as var_scope:
+
+        #1. read data list from records
+        vis_data = _read_images_list(vis_files)
+
+        #2. read image through map(), and batch the dataset
+        n_cpu_cores = os.cpu_count()
+        
+        #vis
+        vis_list = vis_data.map(_parse_vis_record, num_parallel_calls=n_cpu_cores) # each item of train data is the param of fun _parse_record
+        vis_batch = vis_list.batch(batch_size)
+        
+        #3. prefetch
+        vis_batch = vis_batch.prefetch(5)
+
+        #4. create iterator
+        iterator = tf.data.Iterator.from_structure(vis_batch.output_types, vis_batch.output_shapes) 
+        #4.1 initialize iterator
+        vis_init = iterator.make_initializer(vis_batch, name='vis_init')
+        
+        #5. fetch and return
+        fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch = iterator.get_next()
+
+        im_size = int(image_options['resize_size'])
+        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
+        cur_im_batch.set_shape([batch_size, im_size, im_size, 3])
+        anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
+        filename_batch.set_shape([batch_size])
+
+    return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch, train_init, valid_init
+
+
+
+#get data from video which has no annotations
+def get_data_video(video_files, batch_size, variable_scope_name='get_data_video'):
+    
+    with tf.variable_scope(variable_scope_name) as var_scope:
+
+        #1. read data list from vido records
+        video_data = _read_video_list(video_files)
+
+        #2. read image through map(), and batch the dataset
+        n_cpu_cores = os.cpu_count()
+        
+        #video
+        video_list = video_data.map(_parse_video_record, num_parallel_calls=n_cpu_cores) # each item of video data is the param of fun _parse_record
+        video_batch = video_list.batch(batch_size)
+       
+        #3. prefetch
+        video_batch = video_batch.prefetch(5)
+
+        #4. create iterator
+        iterator = tf.data.Iterator.from_structure(video_batch.output_types, video_batch.output_shapes) 
+        #4.1 initialize different iterator
+        video_init = iterator.make_initializer(video_batch, name='video_init')
+        
+        #5. fetch and return
+        fuse_im_batch, cur_im_batch, filename_batch = iterator.get_next()
+
+        im_size = int(image_options['resize_size'])
+        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
+        cur_im_batch.set_shape([batch_size, im_size, im_size,3])
+        filename_batch.set_shape([batch_size])
+
+    return fuse_im_batch, cur_im_batch, filename_batch, video_init
  
+
 if __name__=='__main__':
     train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
     train_data = _read_images_list(train_records)
