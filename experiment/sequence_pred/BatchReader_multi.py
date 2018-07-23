@@ -64,7 +64,7 @@ def transform_gray(filename):
 
 def transform_anno(filename):
     image = tf.read_file(filename)
-    image = tf.image.decode_jpeg(image, channels=1)
+    image = tf.image.decode_jpeg(image, channels=1)/128
     
     if image_options.get("resize", False) and image_options["resize"]:
         resize_size = int(image_options["resize_size"])
