@@ -408,19 +408,19 @@ class FCNNet(object):
                 images_, annos_, filenames_, pred_anno, _, summary_str, loss = sess.run(
                 fetches=[self.images, self.annotations, self.filenames, self.pred_annotation, self.train_op, self.summary_op, self.loss],
                 feed_dict={self.lr: self.learning_rate})
-                '''
-                fn = filenames_[0]
-                print(str(fn))
+                
+                #fn = filenames_[0]
+                #print(str(fn))
                 img = images_[0,:,:,0:3].astype(np.uint8)
-                #img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                print(img.shape)
-                cv2.imwrite(os.path.join('image', 'im' + str(step) + '.bmp'), img)
-                anno = annos_[0].astype(np.uint8)
-                print(anno.shape)
-                cv2.imwrite(os.path.join('image', 'an' + str(step) + '.bmp'), anno)
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                #print(img.shape)
+                #cv2.imwrite(os.path.join('image', 'im' + str(step) + '.bmp'), img)
+                #anno = annos_[0].astype(np.uint8)
+                #print(anno.shape)
+                #cv2.imwrite(os.path.join('image', 'an' + str(step) + '.bmp'), anno)
                 pred_anno_im = (pred_anno[0]*255).astype(np.uint8)
                 cv2.imwrite(os.path.join('image', 'an_pred' + str(step) + '.bmp'), pred_anno_im)
-                '''
+                
 
 
 
@@ -445,8 +445,8 @@ class FCNNet(object):
                 writer.add_summary(summary_str, global_step=step)
 
                 #6. print
-                print('\r' + 12 * ' ', end='')
-                print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t mean_loss=%.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%\t time = %.2f' % (epoch, self.learning_rate, step, loss, (total_loss/count), mean_acc, mean_acc_iou, time_per_batch))
+                print('\r' + 8 * ' ', end='')
+                print('epoch %5d\t lr = %g\t step = %4d\t count = %4d\t loss = %.3f\t mean_loss=%.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%\t time = %.2f' % (epoch, self.learning_rate, step, count, loss, (total_loss/count), mean_acc, mean_acc_iou, time_per_batch))
 
         except tf.errors.OutOfRangeError:
             count -= 1

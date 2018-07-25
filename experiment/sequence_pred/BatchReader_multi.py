@@ -13,7 +13,7 @@ try:
     from .cfgs.config_train_m import cfgs 
 except Exception:
     from cfgs.config_train_m import cfgs
-image_options = {'resize':False, 'resize_size':cfgs.IMAGE_SIZE}
+image_options = {'resize':True, 'resize_size':cfgs.IMAGE_SIZE}
 
     #fuse current frame with sequence 
 def fuse_seq(cur_filename, seq_set_filename):
@@ -58,7 +58,7 @@ def transform_gray(filename):
         resize_size = int(image_options["resize_size"])
         resize_image = tf.image.resize_bilinear([image], size=[resize_size, resize_size])[0]
     else:
-        resize_image = gray_image
+        resize_image = image
 
     return resize_image
 
@@ -72,8 +72,13 @@ def transform_anno(filename):
     else:
         resize_image = image
 
-    return resize_image
+    return resize_image+0.5
 
+def transform_anno_test(filename):
+    image = tf.read_file(filename)
+    image = tf.image.decode_image(image)
+    image = tf.cast(tf.expand_dims(tf.reduce_mean(image, 2),2), tf.int32)
+    return image
 
 #----------Read list Begin------------
 def _read_images_list(files, shuffle=True):
@@ -114,7 +119,7 @@ def _parse_record(seq_filename_set, cur_filename, anno_filename, filename):
     fuse_im = fuse_seq(cur_filename, seq_filename_set)
     fuse_im = tf.cast(fuse_im, tf.float32)
     #get annotation
-    anno_im = tf.cast(transform_anno(anno_filename), tf.int32)
+    anno_im = transform_anno_test(anno_filename)
     return fuse_im, anno_im, filename
 
 def _parse_vis_record(seq_filename_set, cur_filename, anno_filename, filename):
@@ -124,7 +129,8 @@ def _parse_vis_record(seq_filename_set, cur_filename, anno_filename, filename):
     #current frame
     cur_im = transform_rgb(cur_filename)
     #get annotation
-    anno_im = tf.cast(transform_anno(anno_filename), tf.int32)
+    #anno_im = tf.cast(transform_anno(anno_filename), tf.int32)
+    anno_im = transform_anno_test(anno_filename)
 
     return fuse_im, cur_im, anno_im, filename
 
@@ -145,6 +151,8 @@ def get_data_(train_files, valid_files, batch_size, variable_scope_name='get_dat
 
         #1. read data list from records
         train_data = _read_images_list(train_files)
+        #if cache
+        #train_data = train_data.cache()
         valid_data = _read_images_list(valid_files)
 
         #2. read image through map(), and batch the dataset
@@ -152,10 +160,17 @@ def get_data_(train_files, valid_files, batch_size, variable_scope_name='get_dat
         
         #train
         train_list = train_data.map(_parse_record, num_parallel_calls=n_cpu_cores) # each item of train data is the param of fun _parse_record
+        #*
+        train_list = train_list.cache()
+        train_list = train_list.repeat(2)
+        #*
         train_batch = train_list.batch(batch_size)
+        #train_batch = train_list.shuffle(buffer_size=13000).batch(batch_size)
+        train_batch = train_batch.cache()
         #valid
         valid_list = valid_data.map(_parse_record, num_parallel_calls=n_cpu_cores)
         valid_batch = valid_list.batch(batch_size)
+        #valid_batch = valid_batch.cache()
         
         #3. prefetch
         train_batch = train_batch.prefetch(5)
@@ -208,7 +223,7 @@ def get_data_vis(vis_files, batch_size, variable_scope_name='get_data'):
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
 
-    return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch, train_init, valid_init
+    return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch, vis_init
 
 
 
@@ -248,18 +263,22 @@ def get_data_video(video_files, batch_size, variable_scope_name='get_data_video'
 
 if __name__=='__main__':
     filename = tf.placeholder(dtype=tf.string, name='filename') 
-    im_an = transform_anno(filename)
+    im_an = transform_anno_test(filename)
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        im_ = sess.run([im_an], feed_dict={filename:'s2img00308.jpg'})
-        #print(im_)
-        cv2.imwrite('get_an.jpg', im_[0])
-
-
+        im_ = sess.run([im_an], feed_dict={filename:'s2img00016.bmp'})
+        print(im_[0].shape)
+        cv2.imwrite('get_an_noint.jpg', im_[0])
+        
+        for i in range(224):
+            for j in range(224):
+                if im_[0][i][j]!=0:
+                    print(im_[0][i][j])
+    '''
     im_m = transform_misc('s2img00308.jpg')
     print(im_m)
     cv2.imwrite('get_m_an.jpg', im_m)
-
+    '''
 
 
