@@ -70,9 +70,14 @@ class FCNNet(object):
             self.validation_dataset_reader = dataset.BatchDatset(self.valid_records, self.image_options)
 
     def get_data_vis(self):
-        pass
+        with tf.device('/cpu:0'):
+           self.vis_dataset_reader = dataset.BatchDatset(self.valid_records, self.image_options)
+
     def get_data_video(self):
-        pass
+        with tf.device('/cpu:0'):
+           self.video_dataset_reader = dataset.BatchDatset(self.valid_records, self.image_options)
+
+
 
     #2. net
     def vgg_net(self, weights, image):
@@ -249,6 +254,20 @@ class FCNNet(object):
         self.train_optimizer()
         self.summary()
 
+    def build_vis(self):
+        #bulid the visualize graph
+        self.get_data_vis()
+        self.inference(self.images, self.keep_prob)
+        self.loss()
+
+    def build_video(self):
+        #build the video graph
+        self.get_data_video()
+        self.inference(self.images, self.keep_prob)
+        self.loss()
+    
+
+
     #8. update lr
     def try_update_lr(self):
         try:
@@ -286,6 +305,81 @@ class FCNNet(object):
             os.makedirs(self.re_save_dir_ellip)
         if not os.path.exists(self.re_save_dir_transheat):
             os.makedirs(self.re_save_dir_transheat)
+
+    def vis_one_im(self):
+        if cfgs.anno:
+            im_ = pred_visualize(self.vis_image.copy(), self.vis_anno).astype(np.uint8)
+           #im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
+           utils.save_image(im_, self.re_save_dir_im, name='inp_' + self.filename + '.jpg')
+       if cfgs.fit_ellip:
+           im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
+           utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
+       if cfgs.heatmap:
+           heat_map = density_heatmap(self.vis_pred_prob[:, :, 1])
+           utils.save_image(heat_map, self.re_save_dir_heat, name='heat_' + self.filename + '.jpg')
+       if cfgs.trans_heat and cfgs.heatmap:
+           trans_heat_map = translucent_heatmap(self.vis_image.copy(), heat_map.astype(np.uint8).copy())
+           utils.save_image(trans_heat_map, self.re_save_dir_transheat, name='trans_heat_' + self.filenaem + '.jpg')
+
+    #Visualize the result
+    def visualize(self, sess):
+        
+        self.create_re_dir()
+
+        count = 0
+        t0 = time.time()
+
+        try:
+            total_loss = 0
+
+            if_continue = True
+            while if_continue:
+                count += 1
+                images_, annos_, cur_ims_, filenames_, if_continue, _, _ = self.vis_dataset_reader.next_batch_val_vis(self.batch_size)
+                pred_anno, pred_prob = sess.run([self.pred_annotation, self.pro], feed_dict={self.images:images_})
+                pred_anno = np.squeeze(pred_anno, axis=3)
+                
+                for i in range(len(pred_anno)):
+                    self.filename = filenames_[i].strip().decode('utf-8')
+                    self.vis_image = cur_ims_[i]
+                    self.vis_anno = annos_[i]
+                    self.vis_pred = pred_anno[i]
+                    self.vis_pred_prob = pred_prob[i]
+                    #print(self.vis_pred_prob)
+                    self.vis_one_im()
+        except tf.errors.OutOfRangeError:
+            pass
+
+                    
+    #Visualize the video result
+    def vis_video(self, sess):
+        sess.run(self.video_init)
+        
+        self.create_re_dir()
+
+        count = 0
+        t0 = time.time()
+
+        try:
+            total_loss = 0
+
+            if_con = True
+            while if_con:
+                count += 1
+                images_, cur_ims, filenames_, if_con, _, _  = self.video_dataset_reader.next_batch_video_valid(self.batch_size)
+                pred_anno, pred_prob = sess.run([self.pred_annotation, self.logits], feed_dict={self.images:images_})
+                pred_anno = np.squeeze(pred_anno, axis=3)
+
+                for i in range(len(pred_anno)):
+                    self.filename = filenames_[i]
+                    self.vis_image = cur_ims_[i]
+                    self.vis_pred = pred_anno[i]
+                    self.vis_pred_prob = pred_prob[i]
+
+                    self.vis_one_im()
+        except tf.errors.OutOfRangeError:
+            pass
+
 
 
     def valid_once(self, sess, writer, epoch, step):
@@ -430,6 +524,23 @@ class FCNNet(object):
 
         writer.close()
 
+    def vis(self):
+        if not os.path.exists(self.logs_dir):
+            raise Exception('The logs path %s is not found!' % self.logs_dir)
+
+        print('The logs path is %s.' % self.logs_dir)
+        config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+        with tf.device('/gpu:0'):
+            with tf.Session(config=config) as sess:
+                sess.run(tf.global_variables_initializer())
+
+                saver = self.recover_model(sess)
+
+                self.visualize(sess)
+
+
+        
+
 
 #Main function
 def main():
@@ -442,6 +553,28 @@ def main():
         model.build()
         model.train()
 
+def vis_main():
+    with tf.device('/gpu:0'):
+        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print('The number of valid records is %d.' %  len(valid_records))
+        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
+        model.build_vis()
+        model.vis()
+
+def video_main():
+    with tf.device('/gpu:0'):
+        train_records, valid_records = scene_parsing.my_read_video_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print('The number of video records is %d.' %  len(valid_records))
+        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
+        model.build_video()
+        model.vis_video()
 
 if __name__ == '__main__':
-    main()
+    if cfgs.mode == 'train':
+        main()
+    elif cfgs.mode == 'visualize':
+        vis_main()
+    elif cfgs.mode == 'vis_video':
+        video_main()
+
+
