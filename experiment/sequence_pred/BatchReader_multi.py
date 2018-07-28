@@ -13,7 +13,7 @@ try:
     from .cfgs.config_train_m import cfgs 
 except Exception:
     from cfgs.config_train_m import cfgs
-image_options = {'resize':False, 'resize_size':cfgs.IMAGE_SIZE}
+image_options = {'resize':True, 'resize_size':cfgs.IMAGE_SIZE}
 
     #fuse current frame with sequence 
 def fuse_seq(cur_filename, seq_set_filename):
@@ -23,6 +23,14 @@ def fuse_seq(cur_filename, seq_set_filename):
     for i in range(0,cfgs.seq_num):
         frame = tf.concat((frame, transform_gray(seq_set_filename[i])), 2)
    
+    return frame
+
+def fuse_seq_not_cur(seq_set_filename):
+ 
+    frame = transform_gray(seq_set_filename[0])
+    for i in range(1, cfgs.seq_num):
+        frame = tf.concat((frame, transform_gray(seq_set_filename[i])), 2)
+
     return frame
 
 def transform_misc(filename):
@@ -122,6 +130,19 @@ def _parse_record(seq_filename_set, cur_filename, anno_filename, filename):
     anno_im = transform_anno_test(anno_filename)
     return fuse_im, anno_im, filename
 
+def _parse_record_mask(seq_filename_set, cur_filename, anno_filename, filename):
+    #fuse_im_seq(anot current)
+    fuse_im = fuse_seq_not_cur(seq_filename_set)
+    fuse_im = tf.cast(fuse_im, tf.float32)
+
+    current_frame = tf.cast(transform_rgb(cur_filename), tf.float32)
+
+    anno_im = transform_anno_test(anno_filename)
+
+    return fuse_im, current_frame, anno_im, filename
+
+
+
 def _parse_vis_record(seq_filename_set, cur_filename, anno_filename, filename):
     #fuse sequence
     fuse_im = fuse_seq(cur_filename, seq_filename_set)
@@ -144,7 +165,8 @@ def _parse_video_record(seq_filename_set, cur_filename, filename):
     cur_im = transform_rgb(cur_filename)
     
     return fuse_im, cur_im, filename
-
+#-----------------get data------------------------
+#1. get data for train
 def get_data_cache(files, batch_size, if_cache, variable_scope_name='get_data'):
     
     with tf.variable_scope(variable_scope_name) as var_scope:
@@ -176,7 +198,39 @@ def get_data_cache(files, batch_size, if_cache, variable_scope_name='get_data'):
 
     return fuse_im_batch, anno_im_batch, filename_batch
 
+#2. get data for mask
+def get_data_mask(files, batch_size, if_cache, variable_scope_name='get_data_mask'):
+    
+    with tf.variable_scope(variable_scope_name) as var_scope:
+        
+        #1. read data list from records
+        data = _read_images_list(files)
 
+        #2. read image and batch dataset
+        n_cpu_cores = os.cpu_count()
+
+        data_list = data.map(_parse_record_mask, num_parallel_calls=n_cpu_cores)
+        data_batch = data_list.batch(batch_size)
+        if if_cache:
+            data_batch = data_batch.cache()
+        data_batch = data_batch.repeat()
+        #3. prefetch
+        data_batch = data_batch.prefetch(5)
+        
+        #4. make iterator
+        data_iter = data_batch.make_one_shot_iterator()
+        
+        #5. fetch and return
+        fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch = data_iter.get_next()
+
+        im_size = int(image_options['resize_size'])
+        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num])
+        cur_im_batch.set_shape([batch_size, im_size, im_size, cfgs.seq_num])
+        anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
+        filename_batch.set_shape([batch_size])
+        
+        return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch
+#3. old get data for train using iterator
 def get_data_(train_files, valid_files, batch_size, variable_scope_name='get_data'):
     
     with tf.variable_scope(variable_scope_name) as var_scope:

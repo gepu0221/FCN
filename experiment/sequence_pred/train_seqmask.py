@@ -1,4 +1,4 @@
-#This is FCN for sequence
+#This is FCN for sequence as mask created on 20180728
 from __future__ import print_function
 import tensorflow as tf
 import numpy as np
@@ -11,7 +11,7 @@ import read_data as scene_parsing
 import datetime
 import pdb
 #import BatchReader_multi as dataset
-from BatchReader_multi import get_data_, get_data_vis, get_data_video, get_data_cache
+from BatchReader_multi import get_data_, get_data_vis, get_data_video, get_data_cache, get_data_mask
 import CaculateAccurary as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
@@ -19,9 +19,9 @@ from generate_heatmap import density_heatmap, density_heatmap_br, translucent_he
 import shutil
 
 try:
-    from .cfgs.config_train_m import cfgs
+    from .cfgs.config_train_mask import cfgs
 except Exception:
-    from cfgs.config_train_m import cfgs
+    from cfgs.config_train_mask import cfgs
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
@@ -41,15 +41,22 @@ class FCNNet(object):
         self.learning_rate = float(init_lr)
         self.mode = mode
         self.logs_dir = cfgs.logs_dir
+        self.seq_num = cfgs.seq_num
         self.current_itr_var = tf.Variable(0, dtype=tf.int32, name='current_itr', trainable=True)
         self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch', trainable=False)
+        #mask
+        self.inference_name = 'inference_name'
+        self.channel = 3
+        self.seq_infer_name = 'seq_infer_name'
+        self.seq_channel = self.seq_num
 
         self.train_records = train_records
         self.valid_records = valid_records
         self.per_e_train_batch = len(self.train_records)/self.batch_size
         self.per_e_valid_batch = len(self.valid_records)/self.batch_size
 
-        self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, cfgs.seq_num+3], name='input_image')
+        self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 3], name='input_image')
+        self.mask_images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, self.seq_num], name='mask_input_image')
         self.annotations = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1], name='annotations')
 
         if self.mode == 'visualize' or 'video_vis':
@@ -63,6 +70,11 @@ class FCNNet(object):
         with tf.device('/cpu:0'):
             self.train_images, self.train_annotations, self.train_filenames = get_data_cache(self.train_records, self.batch_size, False, 'get_data_train')
             self.valid_images, self.valid_annotations, self.valid_filenames = get_data_cache(self.valid_records, self.batch_size, False, 'get_data_valid')
+
+    def get_data_mask(self):
+        with tf.device('/cpu:0'):
+            self.train_images, self.train_cur_ims, self.train_annotations, self.train_filenames = get_data_mask(self.train_records, False, 'get_data_train_mask')
+            self.valid_images, self.valid_cur_ims, self.valid_annotations, self.valid_filenames = get_data_mask(self.valid_records, False, 'get_data_valid_mask')
 
     def get_data(self):
         with tf.device('/cpu:0'):
@@ -114,7 +126,7 @@ class FCNNet(object):
         return net
 
 
-    def inference(self, keep_prob):
+    def inference(self, images, inference_name, channel,  keep_prob):
         """
         Semantic segmentation network definition
         :param image: input image. Should have values in range 0-255
@@ -131,10 +143,11 @@ class FCNNet(object):
 
         #processed_image = utils.process_image(self.images, mean_pixel)
 
-        with tf.variable_scope("inference"):
-            W1 = utils.weight_variable([3, 3, 7, 64], name="W1")
+        #with tf.variable_scope("inference"):
+        with tf.variable_scope(inference_name):
+            W1 = utils.weight_variable([3, 3, channel, 64], name="W1")
             b1 = utils.bias_variable([64], name="b1")
-            conv1 = utils.conv2d_basic(self.images, W1, b1)
+            conv1 = utils.conv2d_basic(images, W1, b1)
             #conv1 = utils.conv2d_basic(processed_image, W1, b1)
             relu1 = tf.nn.relu(conv1, name='relu1')
             
@@ -178,7 +191,7 @@ class FCNNet(object):
             conv_t2 = utils.conv2d_transpose_strided(fuse_1, W_t2, b_t2, output_shape=tf.shape(image_net["pool3"]))
             fuse_2 = tf.add(conv_t2, image_net["pool3"], name="fuse_2")
 
-            shape = tf.shape(self.images)
+            shape = tf.shape(images)
             deconv_shape3 = tf.stack([shape[0], shape[1], shape[2], NUM_OF_CLASSESS])
             W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
             b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
@@ -186,15 +199,23 @@ class FCNNet(object):
 
             annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
 
-        self.pred_annotation = tf.expand_dims(annotation_pred, dim=3)
-        self.logits = conv_t3
+        #self.pred_annotation = tf.expand_dims(annotation_pred, dim=3)
+        #self.logits = conv_t3
+        return conv_t3
+
+    def mask_mul(self):
+        self.logits = self.inference(self.images, self.inference_name, self.channel, self.keep_prob)
+        self.seq_logits = self.inference(self.mask_images, self.seq_infer_name, self.seq_channel, self.keep_prob)
+        self.seq_pro = tf.nn.softmax(self.seq_logits)
+
+        self.logits_mask = tf.multiply(self.logits, self.seq_pro, name='logits_mask')
+        
     
     #3. optmizer
     def train_optimizer(self):
         optimizer = tf.train.AdamOptimizer(self.lr)
         var_list = tf.trainable_variables()
-        #self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
-        grads = optimizer.compute_gradients(self.loss, var_list=var_list)
+        grads = optimizer.compute_gradients(self.loss_mask, var_list=var_list)
         self.train_op = optimizer.apply_gradients(grads)
 
     
@@ -217,7 +238,14 @@ class FCNNet(object):
         self.focal_loss = tf.reduce_mean(loss_weight * a_w * tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                                        labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                                        name="entropy"))
-
+    
+    #loss for mask
+    def loss_mask(self):
+        self.pro_mask = tf.nn.softmax(self.logits_mask)
+        self.pred_annotation = tf.expand_dims(tf.argmax(self.pro_mask, dimension=3, name='pred_mask'), dim=3)
+        self.loss_mask = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_mask,
+                                                                                        labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
+                                                                                        name='entropy_mask')))
         
     #5. evaluation
     def calculate_acc(self, pred_anno, anno):
@@ -234,20 +262,23 @@ class FCNNet(object):
     #7. summary
     def summary(self):
         with tf.name_scope('summary'):
-            tf.summary.scalar('train_loss', self.loss)
+            tf.summary.scalar('train_loss_mask', self.loss_mask)
             #tf.summary.scalar('accu', self.accu)
             #tf.summary.scalar('iou_accu', self.accu_iou)
             tf.summary.scalar('learning_rate', self.learning_rate)
             self.summary_op = tf.summary.merge_all()
     
     #8. graph build
-    def build(self):
-        #bulid the graph
-        self.get_data_cache()
-        self.inference(self.keep_prob)
-        self.loss()
+    #test mask
+    def build_mask(self):
+        #build the graph
+        self.get_data_mask()
+        #self.inference(self.keep_prob)
+        self.mask_mul()
+        self.loss_mask()
         self.train_optimizer()
         self.summary()
+        
 
     def build_vis(self):
         #bulid the visualize graph
@@ -301,8 +332,7 @@ class FCNNet(object):
 
     def vis_one_im(self):
        if cfgs.anno:
-           #im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
-           im_ = pred_visualize(self.vis_image.copy(), self.vis_anno).astype(np.uint8)
+           im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
            utils.save_image(im_, self.re_save_dir_im, name='inp_' + self.filename + '.jpg')
        if cfgs.fit_ellip:
            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
@@ -327,7 +357,7 @@ class FCNNet(object):
             total_loss = 0
             while True:
                 count += 1
-                images_, annos_, cur_ims_, filenames_ = sess.run([self.vis_images, self.vis_annotations, self.vis_cur_ims, self.vis_filenames])
+                images_, annos_, cur_ims_, filenames_ = sess.run([self.vis_images, self.vis_annotations, self.vis_cur_ims, self.vis_filenams])
                 pred_anno, pred_prob = sess.run([self.pred_annotation, self.pro], feed_dict={self.images:images_})
                 pred_anno = np.squeeze(pred_anno, axis=3)
                 
@@ -357,7 +387,7 @@ class FCNNet(object):
             while True:
                 count += 1
                 images_, cur_ims, filenames_ = sess.run([self.video_images, self.video_cur_ims, self.video_filenames])
-                pred_anno, pred_prob = sess.run([self.pred_annotation, self.logits], feed_dict={self.images:images_})
+                pred_anno, pred_prob = sess.run([self.pred_annotation, self.logits], feed_dict={self.images: images_})
                 pred_anno = np.squeeze(pred_anno, axis=3)
 
                 for i in range(len(pred_anno)):
@@ -383,10 +413,13 @@ class FCNNet(object):
             total_loss = 0
             while count<self.per_e_valid_batch:
                 count +=1
-                images_, annos_ = sess.run([self.valid_images, self.valid_annotations])
+                images_, cur_ims, annos_, filenames = sess.run([self.valid_images, self.valid_cur_ims, self.valid_annotations, self.valid_filenames])
                 pred_anno, summary_str, loss= sess.run(
-                fetches=[self.pred_annotation, self.summary_op, self.loss],
-                feed_dict={self.images: images_, self.annotations: annos_, self.lr: self.learning_rate})
+                fetches=[self.pred_annotation, self.summary_op, self.loss_mask],
+                feed_dict={self.images: cur_ims, self.mask_images: images_, 
+                           self.annotations: annos_, self.lr: self.learning_rate})
+
+
                 writer.add_summary(summary_str, global_step=step)
                 self.calculate_acc(pred_anno, annos_)
                 sum_acc += self.accu
@@ -425,12 +458,12 @@ class FCNNet(object):
                 step += 1
                 count += 1
                 #1. train
-                images_, annos_, filenames = sess.run([self.train_images, self.train_annotations, self.train_filenames])
-
-                pred_anno, _, summary_str, loss = sess.run(
-                fetches=[self.pred_annotation, self.train_op, self.summary_op, self.loss],
-                feed_dict={self.lr: self.learning_rate, self.images: images_, self.annotations: annos_})
+                images_, cur_ims, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_annotations, self.train_filenames])
                 
+                pred_anno, summary_str, loss, _ = sess.run([self.pred_annotations, self.summary_op, self.loss_mask, self.train_op],
+                                                            feed_dict={self.images: cur_ims, self.mask_images: images_, 
+                                                                       self.annotations: annos_, self.lr: self.learning_rate})
+
                 if count % 10 == 0:
                     #fn = filenames_[0]
                     #print(str(fn))
@@ -551,7 +584,7 @@ def main():
         train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
         print('The number of train records is %d and valid records is %d.' % (len(train_records), len(valid_records)))
         model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
-        model.build()
+        model.build_mask()
         model.train()
 
 def vis_main():
