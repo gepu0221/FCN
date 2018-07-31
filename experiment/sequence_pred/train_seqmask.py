@@ -6,15 +6,16 @@ import time
 import math
 import os
 import cv2
+import random
 import TensorflowUtils as utils
 import read_data as scene_parsing
 import datetime
 import pdb
 #import BatchReader_multi as dataset
-from BatchReader_multi import get_data_, get_data_vis, get_data_video, get_data_cache, get_data_mask
+from BatchReader_multi import *
 import CaculateAccurary as accu
 from six.moves import xrange
-from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
+from label_pred import pred_visualize, pred_visualize_choose_color, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
 import shutil
 
@@ -59,7 +60,7 @@ class FCNNet(object):
         self.mask_images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, self.seq_num], name='mask_input_image')
         self.annotations = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1], name='annotations')
 
-        if self.mode == 'visualize' or 'video_vis':
+        if self.mode == 'visualize' or 'vis_video':
             self.result_dir = cfgs.result_dir
         self.at = cfgs.at
         self.gamma = cfgs.gamma
@@ -73,8 +74,8 @@ class FCNNet(object):
 
     def get_data_mask(self):
         with tf.device('/cpu:0'):
-            self.train_images, self.train_cur_ims, self.train_annotations, self.train_filenames = get_data_mask(self.train_records, False, 'get_data_train_mask')
-            self.valid_images, self.valid_cur_ims, self.valid_annotations, self.valid_filenames = get_data_mask(self.valid_records, False, 'get_data_valid_mask')
+            self.train_images, self.train_cur_ims, self.train_annotations, self.train_filenames = get_data_mask(self.train_records, self.batch_size, False, 'get_data_train_mask')
+            self.valid_images, self.valid_cur_ims, self.valid_annotations, self.valid_filenames = get_data_mask(self.valid_records, self.batch_size, False, 'get_data_valid_mask')
 
     def get_data(self):
         with tf.device('/cpu:0'):
@@ -84,9 +85,9 @@ class FCNNet(object):
         with tf.device('/cpu:0'):
             self.vis_images, self.vis_cur_ims, self.vis_annotations, self.vis_filenames, self.vis_init = get_data_vis(self.valid_records, self.batch_size)
 
-    def get_data_video(self):
-        with tf.decice('/cpu:0'):
-            self.video_images, self.video_cur_ims, self.video_filenames, self.video_init = get_data_video(self.valid_records, self.batch_size)
+    def get_data_video_mask(self):
+        with tf.device('/cpu:0'):
+            self.video_images, self.video_cur_ims, self.video_filenames, self.video_init = get_data_video_mask(self.valid_records, self.batch_size)
 
     #2. net
     def vgg_net(self, weights, image):
@@ -206,7 +207,13 @@ class FCNNet(object):
     def mask_mul(self):
         self.logits = self.inference(self.images, self.inference_name, self.channel, self.keep_prob)
         self.seq_logits = self.inference(self.mask_images, self.seq_infer_name, self.seq_channel, self.keep_prob)
+        self.cur_pro = tf.nn.softmax(self.logits)
+        self.cur_pro_max = tf.subtract(self.cur_pro, cfgs.offset)
         self.seq_pro = tf.nn.softmax(self.seq_logits)
+
+        self.pred_cur_anno = tf.expand_dims(tf.argmax(self.cur_pro, dimension=3, name='pred_anno_cur'), dim=3)
+        self.pred_cur_max_anno = tf.expand_dims(tf.argmax(self.cur_pro_max, dimension=3, name='pred_anno_cur_max'), dim=3)
+        self.pred_seq_anno = tf.expand_dims(tf.argmax(self.seq_pro, dimension=3, name='pred_anno_seq'), dim=3)
 
         self.logits_mask = tf.multiply(self.logits, self.seq_pro, name='logits_mask')
         
@@ -216,29 +223,11 @@ class FCNNet(object):
         optimizer = tf.train.AdamOptimizer(self.lr)
         var_list = tf.trainable_variables()
         grads = optimizer.compute_gradients(self.loss_mask, var_list=var_list)
+        pdb.set_trace()
         self.train_op = optimizer.apply_gradients(grads)
 
     
     #4. loss
-    def loss(self):
-        self.loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
-                                                                          labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
-                                                                          name="entropy")))
-
-        self.pro = tf.nn.softmax(self.logits)
-        #self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
-
-        #focal loss
-        a_w = (1 - 2*self.at) * tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), tf.float32) + self.at
-        self.pro = tf.nn.softmax(self.logits)
-      
-        loss_weight = tf.pow(1-tf.reduce_sum(self.pro * tf.one_hot(tf.squeeze(self.annotations, squeeze_dims=[3]), self.NUM_OF_CLASSESS), 3), self.gamma)
-     
-    
-        self.focal_loss = tf.reduce_mean(loss_weight * a_w * tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
-                                                                                       labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
-                                                                                       name="entropy"))
-    
     #loss for mask
     def loss_mask(self):
         self.pro_mask = tf.nn.softmax(self.logits_mask)
@@ -273,7 +262,6 @@ class FCNNet(object):
     def build_mask(self):
         #build the graph
         self.get_data_mask()
-        #self.inference(self.keep_prob)
         self.mask_mul()
         self.loss_mask()
         self.train_optimizer()
@@ -283,14 +271,19 @@ class FCNNet(object):
     def build_vis(self):
         #bulid the visualize graph
         self.get_data_vis()
-        self.inference(self.keep_prob)
-        self.loss()
+        self.mask_mul()
+        self.loss_mask()
+        self.train_optimizer()
+        self.summary()
+        
 
     def build_video(self):
         #build the video graph
-        self.get_data_video()
-        self.inference(self.keep_prob)
-        self.loss()
+        self.get_data_video_mask()
+        self.mask_mul()
+        self.loss_mask()
+        
+        
     
     #9. update lr
     def try_update_lr(self):
@@ -331,18 +324,27 @@ class FCNNet(object):
             os.makedirs(self.re_save_dir_transheat)
 
     def vis_one_im(self):
-       if cfgs.anno:
-           im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
-           utils.save_image(im_, self.re_save_dir_im, name='inp_' + self.filename + '.jpg')
-       if cfgs.fit_ellip:
-           im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
-           utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
-       if cfgs.heatmap:
-           heat_map = density_heatmap(self.vis_pred_prob[:, :, 1])
-           utils.save_image(heat_map, self.re_save_dir_heat, name='heat_' + self.filename + '.jpg')
-       if cfgs.trans_heat and cfgs.heatmap:
-           trans_heat_map = translucent_heatmap(self.vis_image.copy(), heat_map.astype(np.uint8).copy())
-           utils.save_image(trans_heat_map, self.re_save_dir_transheat, name='trans_heat_' + self.filenaem + '.jpg')
+        if cfgs.anno:
+            im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
+            utils.save_image(im_, self.re_save_dir_im, name='inp_' + self.filename + '.jpg')
+        if cfgs.fit_ellip:
+            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
+            utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
+        if cfgs.heatmap:
+            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
+            utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
+            utils.save_image(heat_map, self.re_save_dir_heat, name='heat_' + self.filename + '.jpg')
+        if cfgs.trans_heat and cfgs.heatmap:
+            trans_heat_map = translucent_heatmap(self.vis_image.copy(), heat_map.astype(np.uint8).copy())
+            utils.save_image(trans_heat_map, self.re_save_dir_transheat, name='trans_heat_' + self.filenaem + '.jpg')
+        if cfgs.anno_fuse:
+            im_ = pred_visualize_choose_color(self.vis_image.copy(), (self.vis_pred+self.vis_pred_cur_max)).astype(np.uint8)
+            #im_ = pred_visualize_choose_color(im_, self.vis_pred_cur_max, [255,0,0]).astype(np.uint8)
+            utils.save_image(im_, self.re_save_dir_im, name='fuse_' + self.filename + '.jpg')
+        if cfgs.fuse_ellip:
+            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred+self.vis_pred_cur_max, axis=2).astype(np.uint8))
+            utils.save_image(im_ellip, self.re_save_dir_ellip, name='fuse_ellip_' + self.filename + '.jpg')
+ 
 
     #Visualize the result
     def visualize(self, sess):
@@ -367,14 +369,13 @@ class FCNNet(object):
                     self.vis_anno = annos_[i]
                     self.vis_pred = pred_anno[i]
                     self.vis_pred_prob = pred_prob[i]
-                    #print(self.vis_pred_prob)
                     self.vis_one_im()
         except tf.errors.OutOfRangeError:
             pass
 
                     
     #Visualize the video result
-    def vis_video(self, sess):
+    def vis_video_once(self, sess):
         sess.run(self.video_init)
         
         self.create_re_dir()
@@ -386,14 +387,17 @@ class FCNNet(object):
             total_loss = 0
             while True:
                 count += 1
-                images_, cur_ims, filenames_ = sess.run([self.video_images, self.video_cur_ims, self.video_filenames])
-                pred_anno, pred_prob = sess.run([self.pred_annotation, self.logits], feed_dict={self.images: images_})
+                images_, cur_ims_, filenames_ = sess.run([self.video_images, self.video_cur_ims, self.video_filenames])
+                pred_anno, pred_cur_max_anno, pred_prob = sess.run([self.pred_annotation, self.pred_cur_max_anno, self.pro_mask], feed_dict={self.images: cur_ims_, self.mask_images: images_})
+                #pred_anno, pred_prob = sess.run([self.pred_cur_anno, self.cur_pro], feed_dict={self.images: cur_ims_, self.mask_images: images_})
                 pred_anno = np.squeeze(pred_anno, axis=3)
+                pred_cur_max_anno = np.squeeze(pred_cur_max_anno, axis=3)
 
                 for i in range(len(pred_anno)):
-                    self.filename = filenames_[i]
+                    self.filename = filenames_[i].strip().decode('utf-8')
                     self.vis_image = cur_ims_[i]
                     self.vis_pred = pred_anno[i]
+                    self.vis_pred_cur_max = pred_cur_max_anno[i]
                     self.vis_pred_prob = pred_prob[i]
 
                     self.vis_one_im()
@@ -460,22 +464,29 @@ class FCNNet(object):
                 #1. train
                 images_, cur_ims, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_annotations, self.train_filenames])
                 
-                pred_anno, summary_str, loss, _ = sess.run([self.pred_annotations, self.summary_op, self.loss_mask, self.train_op],
+                pred_anno, pred_cur_anno, pred_seq_pro, summary_str, loss, _ = sess.run([self.pred_annotation, self.pred_cur_anno, self.seq_pro, self.summary_op, self.loss_mask, self.train_op],
                                                             feed_dict={self.images: cur_ims, self.mask_images: images_, 
                                                                        self.annotations: annos_, self.lr: self.learning_rate})
 
                 if count % 10 == 0:
-                    #fn = filenames_[0]
-                    #print(str(fn))
-                    img = images_[0,:,:,0:3].astype(np.uint8)
-                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                    #print(img.shape)
+                    choosen = random.randint(0, self.batch_size-1)
+                    fn = filenames[choosen].strip().decode('utf-8')
+                    #img = images_[0,:,:,0:3].astype(np.uint8)
+                    #img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                     #cv2.imwrite(os.path.join('image', 'im' + str(step) + '.bmp'), img)
                     #anno = annos_[0].astype(np.uint8)
-                    #print(anno.shape)
                     #cv2.imwrite(os.path.join('image', 'an' + str(step) + '.bmp'), anno)
-                    pred_anno_im = (pred_anno[0]*255).astype(np.uint8)
-                    cv2.imwrite(os.path.join('image', 'an_pred' + str(step) + '.bmp'), pred_anno_im)
+                    pred_anno_im = (pred_anno[choosen]*255).astype(np.uint8)
+                    cv2.imwrite(os.path.join('image', 'mask', str(step)+'_'+fn+'.bmp'), pred_anno_im)
+                    pred_cur_im = (pred_cur_anno[choosen]*255).astype(np.uint8)
+                    cv2.imwrite(os.path.join('image', 'mask', str(step)+'_cur_'+fn+'.bmp'), pred_cur_im)
+                    #print(pred_seq_pro[choosen, :, :, 1])
+                    heat_map = density_heatmap(pred_seq_pro[choosen, :, :, 1])
+                    cv2.imwrite(os.path.join('image', 'mask', str(step)+'_heatseq_'+fn+'.bmp'), heat_map)
+                    img_seq = images_[choosen]
+                    cv2.imwrite(os.path.join('image', 'mask', str(step)+'_seq_'+fn+'.bmp'), img_seq)
+                    #pred_seq_im = (pred_seq_anno[choosen]*255).astype(np.uint8)
+                    #cv2.imwrite(os.path.join('image', 'mask', str(step)+'_seq_'+fn+'.bmp'), pred_seq_im)
 
                 #2. calculate accurary
                 #if count % 10 ==0:
@@ -573,7 +584,21 @@ class FCNNet(object):
 
                 self.visualize(sess)
 
+    def vis_video(self):
+        if not os.path.exists(self.logs_dir):
+            raise Exception('The logs path %s is not found!' % self.logs_dir)
 
+        print('The logs path is %s.' % self.logs_dir)
+        config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+        with tf.device('/gpu:0'):
+            with tf.Session(config=config) as sess:
+                sess.run(tf.global_variables_initializer())
+
+                saver = self.recover_model(sess)
+
+                self.vis_video_once(sess)
+
+        
 
 #-------------------------------------------------------------------------------
 

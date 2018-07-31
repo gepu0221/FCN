@@ -108,7 +108,7 @@ def _read_images_list(files, shuffle=True):
 def _read_video_list(files, shuffle=True):
     
     if shuffle:
-        ramdom.shuffle(files)
+        random.shuffle(files)
 
     #seq, cur, filename
     seq_images = [item['seq'] for item in files]
@@ -160,10 +160,20 @@ def _parse_video_record(seq_filename_set, cur_filename, filename):
     
     #fuse sequence
     fuse_im = fuse_seq(cur_filename, seq_filename_set)
-    fuse_im = tf.cast(fues_im, tf.float32)
+    fuse_im = tf.cast(fuse_im, tf.float32)
     #current frame
     cur_im = transform_rgb(cur_filename)
     
+    return fuse_im, cur_im, filename
+#parse video data without annotations using mask
+def _parse_video_mask_record(seq_filename_set, cur_filename, filename):
+    
+    #fuse sequence
+    fuse_im = fuse_seq_not_cur(seq_filename_set)
+    fuse_im = tf.cast(fuse_im, tf.float32)
+    #current frame
+    cur_im =  tf.cast(transform_rgb(cur_filename), tf.float32)
+
     return fuse_im, cur_im, filename
 #-----------------get data------------------------
 #1. get data for train
@@ -224,12 +234,13 @@ def get_data_mask(files, batch_size, if_cache, variable_scope_name='get_data_mas
         fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch = data_iter.get_next()
 
         im_size = int(image_options['resize_size'])
-        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num])
-        cur_im_batch.set_shape([batch_size, im_size, im_size, cfgs.seq_num])
+        fuse_im_batch.set_shape([batch_size, im_size, im_size, cfgs.seq_num])
+        cur_im_batch.set_shape([batch_size, im_size, im_size, 3])
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
         
         return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch
+
 #3. old get data for train using iterator
 def get_data_(train_files, valid_files, batch_size, variable_scope_name='get_data'):
     
@@ -346,7 +357,39 @@ def get_data_video(video_files, batch_size, variable_scope_name='get_data_video'
         filename_batch.set_shape([batch_size])
 
     return fuse_im_batch, cur_im_batch, filename_batch, video_init
- 
+
+def get_data_video_mask(video_files, batch_size, variable_scope_name='get_data_vide0_mask'):
+    
+    with tf.variable_scope(variable_scope_name) as var_scope:
+        
+        #1. read data list from video records
+        video_data = _read_video_list(video_files)
+
+        #2. read image through map(), and batch the dataset
+        n_cpu_cores = os.cpu_count()
+
+        #video
+        video_list = video_data.map(_parse_video_mask_record, num_parallel_calls=n_cpu_cores)
+        video_batch = video_list.batch(batch_size)
+
+        #3. prefetch
+        video_batch = video_batch.prefetch(5)
+
+        #4. create iterator
+        iterator = tf.data.Iterator.from_structure(video_batch.output_types, video_batch.output_shapes) 
+        #4.1 initialize different iterator
+        video_init = iterator.make_initializer(video_batch, name='video_init')
+        
+        #5. fetch and return
+        fuse_im_batch, cur_im_batch, filename_batch = iterator.get_next()
+
+        im_size = int(image_options['resize_size'])
+        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num])
+        cur_im_batch.set_shape([batch_size, im_size, im_size,3])
+        filename_batch.set_shape([batch_size])
+
+    return fuse_im_batch, cur_im_batch, filename_batch, video_init
+
 
 if __name__=='__main__':
     filename = tf.placeholder(dtype=tf.string, name='filename') 
