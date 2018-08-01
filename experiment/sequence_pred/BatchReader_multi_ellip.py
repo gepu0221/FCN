@@ -1,4 +1,4 @@
-#Multithreading batchreader for sequence FCN first modifed on 20180712.
+#Multithreading batchreader for sequence FCN and add ellipse info to evaluate accuracy first modifed on 201800801.
 import numpy as np 
 import tensorflow as tf
 import scipy.misc as misc
@@ -89,19 +89,22 @@ def transform_anno_test(filename):
     return image
 
 #----------Read list Begin------------
+
+#use ellipse info to evaluate accuracy
 def _read_images_list(files, shuffle=True):
-    
+
     if shuffle:
         random.shuffle(files)
 
-    #seq, cur, anno, filename
+    #seq, cur, anno, ellip_info, filename
     seq_images = [item['seq'] for item in files]
     cur_images = [item['current'] for item in files]
+    ellip_infos = [item['ellip_info'] for item in files]
     
     annotations = [item['annotation'] for item in files]
-   
-    filenames =  [item['filename'] for item in files]
-    data = tf.data.Dataset.from_tensor_slices((seq_images, cur_images, annotations, filenames))
+
+    filenames = [item['filename'] for item in files]
+    data = tf.data.Dataset.from_tensor_slices((seq_images, cur_images, ellip_infos, annotations, filenames))
 
     return data
 
@@ -121,16 +124,16 @@ def _read_video_list(files, shuffle=True):
 #----------------Read List End----------------
 
 #----------------Parse List Begin-------------
-def _parse_record(seq_filename_set, cur_filename, anno_filename, filename):
+def _parse_record(seq_filename_set, cur_filename, ellip_info, anno_filename, filename):
     
     #fuse sequence
     fuse_im = fuse_seq(cur_filename, seq_filename_set)
     fuse_im = tf.cast(fuse_im, tf.float32)
     #get annotation
     anno_im = transform_anno_test(anno_filename)
-    return fuse_im, anno_im, filename
+    return fuse_im, ellip_info, anno_im, filename
 
-def _parse_record_mask(seq_filename_set, cur_filename, anno_filename, filename):
+def _parse_record_mask(seq_filename_set, cur_filename, ellip_info,  anno_filename, filename):
     #fuse_im_seq(anot current)
     fuse_im = fuse_seq_not_cur(seq_filename_set)
     fuse_im = tf.cast(fuse_im, tf.float32)
@@ -139,11 +142,11 @@ def _parse_record_mask(seq_filename_set, cur_filename, anno_filename, filename):
 
     anno_im = transform_anno_test(anno_filename)
 
-    return fuse_im, current_frame, anno_im, filename
+    return fuse_im, current_frame, ellip_info, anno_im, filename
 
 
 
-def _parse_vis_record(seq_filename_set, cur_filename, anno_filename, filename):
+def _parse_vis_record(seq_filename_set, cur_filename, ellip_info, anno_filename, filename):
     #fuse sequence
     fuse_im = fuse_seq(cur_filename, seq_filename_set)
     fuse_im = tf.cast(fuse_im, tf.float32)
@@ -153,9 +156,9 @@ def _parse_vis_record(seq_filename_set, cur_filename, anno_filename, filename):
     #anno_im = tf.cast(transform_anno(anno_filename), tf.int32)
     anno_im = transform_anno_test(anno_filename)
 
-    return fuse_im, cur_im, anno_im, filename
+    return fuse_im, cur_im, ellip_info, anno_im, filename
 
-def _parse_vis_mask_record(seq_filename_set, cur_filename, anno_filename, filename):
+def _parse_vis_mask_record(seq_filename_set, cur_filename, ellip_info, anno_filename, filename):
     #fuse sequence
     fuse_im = fuse_seq_not_cur(seq_filename_set)
     fuse_im = tf.cast(fuse_im, tf.float32)
@@ -165,7 +168,7 @@ def _parse_vis_mask_record(seq_filename_set, cur_filename, anno_filename, filena
     #anno_im = tf.cast(transform_anno(anno_filename), tf.int32)
     anno_im = transform_anno_test(anno_filename)
 
-    return fuse_im, cur_im, anno_im, filename
+    return fuse_im, cur_im, ellip_info, anno_im, filename
 
 
 
@@ -213,14 +216,15 @@ def get_data_cache(files, batch_size, if_cache, variable_scope_name='get_data'):
         data_iter = data_batch.make_one_shot_iterator()
         
         #5. fetch and return
-        fuse_im_batch, anno_im_batch, filename_batch = data_iter.get_next()
+        fuse_im_batch, ellip_info_batch, anno_im_batch, filename_batch = data_iter.get_next()
 
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
+        ellip_info_batch.set_shape([batch_size, 4])
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
 
-    return fuse_im_batch, anno_im_batch, filename_batch
+    return fuse_im_batch, ellip_info_batch, anno_im_batch, filename_batch
 
 #2. get data for mask
 def get_data_mask(files, batch_size, if_cache, variable_scope_name='get_data_mask'):
@@ -245,64 +249,17 @@ def get_data_mask(files, batch_size, if_cache, variable_scope_name='get_data_mas
         data_iter = data_batch.make_one_shot_iterator()
         
         #5. fetch and return
-        fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch = data_iter.get_next()
+        fuse_im_batch, ellip_info_batch, cur_im_batch, anno_im_batch, filename_batch = data_iter.get_next()
 
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([batch_size, im_size, im_size, cfgs.seq_num])
+        ellip_info_batch.set_shape([batch_size, 4])
         cur_im_batch.set_shape([batch_size, im_size, im_size, 3])
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
         
         return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch
 
-#3. old get data for train using iterator
-def get_data_(train_files, valid_files, batch_size, variable_scope_name='get_data'):
-    
-    with tf.variable_scope(variable_scope_name) as var_scope:
-
-        #1. read data list from records
-        train_data = _read_images_list(train_files)
-        #if cache
-        #train_data = train_data.cache()
-        valid_data = _read_images_list(valid_files)
-
-        #2. read image through map(), and batch the dataset
-        n_cpu_cores = os.cpu_count()
-        
-        #train
-        train_list = train_data.map(_parse_record, num_parallel_calls=n_cpu_cores) # each item of train data is the param of fun _parse_record
-        #*
-        #train_list = train_list.cache()
-        #train_list = train_list.repeat(2)
-        #*
-        train_batch = train_list.batch(batch_size)
-        #train_batch = train_list.shuffle(buffer_size=13000).batch(batch_size)
-        train_batch = train_batch.cache()
-        train_batch = train_batch.repeat(2)
-        #valid
-        valid_list = valid_data.map(_parse_record, num_parallel_calls=n_cpu_cores)
-        valid_batch = valid_list.batch(batch_size)
-        #valid_batch = valid_batch.cache()
-        
-        #3. prefetch
-        train_batch = train_batch.prefetch(5)
-        valid_batch = valid_batch.prefetch(5)
-
-        #4. create iterator
-        iterator = tf.data.Iterator.from_structure(train_batch.output_types, train_batch.output_shapes) 
-        #4.1 initialize different iterator
-        train_init = iterator.make_initializer(train_batch, name='train_init')
-        valid_init = iterator.make_initializer(valid_batch, name='valid_init')
-        
-        #5. fetch and return
-        fuse_im_batch, anno_im_batch, filename_batch = iterator.get_next()
-
-        im_size = int(image_options['resize_size'])
-        fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
-        anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
-        filename_batch.set_shape([batch_size])
-
-    return fuse_im_batch, anno_im_batch, filename_batch, train_init, valid_init
 
 def get_data_vis(vis_files, batch_size, variable_scope_name='get_data'):
     
@@ -327,15 +284,16 @@ def get_data_vis(vis_files, batch_size, variable_scope_name='get_data'):
         vis_init = iterator.make_initializer(vis_batch, name='vis_init')
         
         #5. fetch and return
-        fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch = iterator.get_next()
+        fuse_im_batch, ellip_info_batch, cur_im_batch, anno_im_batch, filename_batch = iterator.get_next()
 
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
+        ellip_info_batch.set_shape([batch_size, 4])
         cur_im_batch.set_shape([batch_size, im_size, im_size, 3])
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
 
-    return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch, vis_init
+    return fuse_im_batch, ellip_info_batch, cur_im_batch, anno_im_batch, filename_batch, vis_init
 
 def get_data_vis_mask(vis_files, batch_size, variable_scope_name='get_data_vis_mask'):
     
@@ -360,7 +318,7 @@ def get_data_vis_mask(vis_files, batch_size, variable_scope_name='get_data_vis_m
         vis_init = iterator.make_initializer(vis_batch, name='vis_init')
         
         #5. fetch and return
-        fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch = iterator.get_next()
+        fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch = iterator.get_next()
 
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num])
@@ -368,7 +326,7 @@ def get_data_vis_mask(vis_files, batch_size, variable_scope_name='get_data_vis_m
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
 
-    return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch, vis_init
+    return fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch, vis_init
 
 
 #get data from video which has no annotations
@@ -435,6 +393,17 @@ def get_data_video_mask(video_files, batch_size, variable_scope_name='get_data_v
         filename_batch.set_shape([batch_size])
 
     return fuse_im_batch, cur_im_batch, filename_batch, video_init
+
+#----------------Get data with ellipse information-----------------
+def get_data_ellip(files, batch_size, if_cache, variable_scope_name='get_data_ellip'):
+    
+    #1. read data list from records with ellipse information
+    data = _read_images_list_ellip_info(files)
+
+    #2. read image and batch dataset
+    n_cpu_cores = os.cpu_count()
+
+    data_list = data.map(_parse_record)
 
 
 if __name__=='__main__':

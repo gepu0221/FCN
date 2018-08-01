@@ -81,9 +81,9 @@ class FCNNet(object):
         with tf.device('/cpu:0'):
             self.images, self.annotations, self.filenames, self.train_init, self.valid_init = get_data_(self.train_records, self.valid_records, self.batch_size)
     
-    def get_data_vis(self):
+    def get_data_vis_mask(self):
         with tf.device('/cpu:0'):
-            self.vis_images, self.vis_cur_ims, self.vis_annotations, self.vis_filenames, self.vis_init = get_data_vis(self.valid_records, self.batch_size)
+            self.vis_images, self.vis_cur_ims, self.vis_annotations, self.vis_filenames, self.vis_init = get_data_vis_mask(self.valid_records, self.batch_size)
 
     def get_data_video_mask(self):
         with tf.device('/cpu:0'):
@@ -222,8 +222,8 @@ class FCNNet(object):
     def train_optimizer(self):
         optimizer = tf.train.AdamOptimizer(self.lr)
         var_list = tf.trainable_variables()
-        grads = optimizer.compute_gradients(self.loss_mask, var_list=var_list)
-        pdb.set_trace()
+        grads = optimizer.compute_gradients(self.loss_seq_mask, var_list=var_list)
+        #pdb.set_trace()
         self.train_op = optimizer.apply_gradients(grads)
 
     
@@ -235,7 +235,13 @@ class FCNNet(object):
         self.loss_mask = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_mask,
                                                                                         labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                                         name='entropy_mask')))
-        
+    #only for seq
+    def loss_seq_mask(self):
+        self.seq_logits = self.inference(self.mask_images, self.seq_infer_name, self.seq_channel, self.keep_prob)
+        self.loss_seq_mask = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.seq_logits_mask,
+                                                                                        labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
+                                                                                        name='entropy_mask')))
+ 
     #5. evaluation
     def calculate_acc(self, pred_anno, anno):
         with tf.name_scope('accu'):
@@ -266,11 +272,17 @@ class FCNNet(object):
         self.loss_mask()
         self.train_optimizer()
         self.summary()
+
+    def build_mask_seq(self):
+        self.get_data_mask()
+        self.loss_seq_max()
+        self.train_optimizer()
+        
         
 
     def build_vis(self):
         #bulid the visualize graph
-        self.get_data_vis()
+        self.get_data_vis_mask()
         self.mask_mul()
         self.loss_mask()
         self.train_optimizer()
@@ -331,8 +343,7 @@ class FCNNet(object):
             im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
             utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
         if cfgs.heatmap:
-            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
-            utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
+            heat_map = density_heatmap(self.vis_pred_prob[:, :, 1])
             utils.save_image(heat_map, self.re_save_dir_heat, name='heat_' + self.filename + '.jpg')
         if cfgs.trans_heat and cfgs.heatmap:
             trans_heat_map = translucent_heatmap(self.vis_image.copy(), heat_map.astype(np.uint8).copy())
@@ -359,8 +370,8 @@ class FCNNet(object):
             total_loss = 0
             while True:
                 count += 1
-                images_, annos_, cur_ims_, filenames_ = sess.run([self.vis_images, self.vis_annotations, self.vis_cur_ims, self.vis_filenams])
-                pred_anno, pred_prob = sess.run([self.pred_annotation, self.pro], feed_dict={self.images:images_})
+                images_, annos_, cur_ims_, filenames_ = sess.run([self.vis_images, self.vis_annotations, self.vis_cur_ims, self.vis_filenames])
+                pred_anno, pred_prob = sess.run([self.pred_annotation, self.cur_pro], feed_dict={self.images: cur_ims_, self.mask_images: images_})
                 pred_anno = np.squeeze(pred_anno, axis=3)
                 
                 for i in range(len(pred_anno)):
@@ -468,6 +479,8 @@ class FCNNet(object):
                                                             feed_dict={self.images: cur_ims, self.mask_images: images_, 
                                                                        self.annotations: annos_, self.lr: self.learning_rate})
 
+
+                print(pred_seq_pro[0].shape)
                 if count % 10 == 0:
                     choosen = random.randint(0, self.batch_size-1)
                     fn = filenames[choosen].strip().decode('utf-8')
