@@ -100,7 +100,8 @@ def _read_images_list(files, shuffle=True):
     seq_images = [item['seq'] for item in files]
     cur_images = [item['current'] for item in files]
     ellip_infos = [item['ellip_info'] for item in files]
-    
+    #print(len(ellip_infos))
+
     annotations = [item['annotation'] for item in files]
 
     filenames = [item['filename'] for item in files]
@@ -129,9 +130,11 @@ def _parse_record(seq_filename_set, cur_filename, ellip_info, anno_filename, fil
     #fuse sequence
     fuse_im = fuse_seq(cur_filename, seq_filename_set)
     fuse_im = tf.cast(fuse_im, tf.float32)
+
+    current_frame = tf.cast(transform_rgb(cur_filename), tf.float32)
     #get annotation
     anno_im = transform_anno_test(anno_filename)
-    return fuse_im, ellip_info, anno_im, filename
+    return fuse_im, current_frame, ellip_info, anno_im, filename
 
 def _parse_record_mask(seq_filename_set, cur_filename, ellip_info,  anno_filename, filename):
     #fuse_im_seq(anot current)
@@ -216,15 +219,16 @@ def get_data_cache(files, batch_size, if_cache, variable_scope_name='get_data'):
         data_iter = data_batch.make_one_shot_iterator()
         
         #5. fetch and return
-        fuse_im_batch, ellip_info_batch, anno_im_batch, filename_batch = data_iter.get_next()
+        fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch = data_iter.get_next()
 
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
+        cur_im_batch.set_shape([batch_size, im_size, im_size, 3])
         ellip_info_batch.set_shape([batch_size, 4])
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
 
-    return fuse_im_batch, ellip_info_batch, anno_im_batch, filename_batch
+    return fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch
 
 #2. get data for mask
 def get_data_mask(files, batch_size, if_cache, variable_scope_name='get_data_mask'):
@@ -249,7 +253,7 @@ def get_data_mask(files, batch_size, if_cache, variable_scope_name='get_data_mas
         data_iter = data_batch.make_one_shot_iterator()
         
         #5. fetch and return
-        fuse_im_batch, ellip_info_batch, cur_im_batch, anno_im_batch, filename_batch = data_iter.get_next()
+        fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch = data_iter.get_next()
 
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([batch_size, im_size, im_size, cfgs.seq_num])
@@ -258,7 +262,7 @@ def get_data_mask(files, batch_size, if_cache, variable_scope_name='get_data_mas
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
         
-        return fuse_im_batch, cur_im_batch, anno_im_batch, filename_batch
+        return fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch
 
 
 def get_data_vis(vis_files, batch_size, variable_scope_name='get_data'):
@@ -284,7 +288,7 @@ def get_data_vis(vis_files, batch_size, variable_scope_name='get_data'):
         vis_init = iterator.make_initializer(vis_batch, name='vis_init')
         
         #5. fetch and return
-        fuse_im_batch, ellip_info_batch, cur_im_batch, anno_im_batch, filename_batch = iterator.get_next()
+        fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch = iterator.get_next()
 
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num+3])
@@ -293,7 +297,7 @@ def get_data_vis(vis_files, batch_size, variable_scope_name='get_data'):
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
 
-    return fuse_im_batch, ellip_info_batch, cur_im_batch, anno_im_batch, filename_batch, vis_init
+    return fuse_im_batch, cur_im_batch, ellip_info_batch, anno_im_batch, filename_batch, vis_init
 
 def get_data_vis_mask(vis_files, batch_size, variable_scope_name='get_data_vis_mask'):
     
@@ -323,6 +327,7 @@ def get_data_vis_mask(vis_files, batch_size, variable_scope_name='get_data_vis_m
         im_size = int(image_options['resize_size'])
         fuse_im_batch.set_shape([ batch_size, im_size, im_size, cfgs.seq_num])
         cur_im_batch.set_shape([batch_size, im_size, im_size, 3])
+        ellip_info_batch.set_shape([batch_size, 1])
         anno_im_batch.set_shape([batch_size, im_size, im_size, 1])
         filename_batch.set_shape([batch_size])
 
@@ -394,36 +399,5 @@ def get_data_video_mask(video_files, batch_size, variable_scope_name='get_data_v
 
     return fuse_im_batch, cur_im_batch, filename_batch, video_init
 
-#----------------Get data with ellipse information-----------------
-def get_data_ellip(files, batch_size, if_cache, variable_scope_name='get_data_ellip'):
-    
-    #1. read data list from records with ellipse information
-    data = _read_images_list_ellip_info(files)
-
-    #2. read image and batch dataset
-    n_cpu_cores = os.cpu_count()
-
-    data_list = data.map(_parse_record)
-
-
-if __name__=='__main__':
-    filename = tf.placeholder(dtype=tf.string, name='filename') 
-    im_an = transform_anno_test(filename)
-
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-        im_ = sess.run([im_an], feed_dict={filename:'s2img00016.bmp'})
-        print(im_[0].shape)
-        cv2.imwrite('get_an_noint.jpg', im_[0])
-        
-        for i in range(224):
-            for j in range(224):
-                if im_[0][i][j]!=0:
-                    print(im_[0][i][j])
-    '''
-    im_m = transform_misc('s2img00308.jpg')
-    print(im_m)
-    cv2.imwrite('get_m_an.jpg', im_m)
-    '''
 
 
