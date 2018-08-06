@@ -54,7 +54,7 @@ class SeqFCNNet(FCNNet):
 
     def get_data_video(self):
         with tf.device('/cpu:0'):
-            self.video_images, self.video_filenames, self.video_init = get_data_video(self.valid_records, self.batch_size)
+            self.video_images, self.video_cur_ims, self.video_filenames, self.video_init = get_data_video(self.valid_records, self.batch_size)
 
     #2. loss 
     def loss(self):
@@ -64,6 +64,11 @@ class SeqFCNNet(FCNNet):
         self.loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                                         labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                                         name='entropy_mask')))
+
+        #test 
+        #show the lower probility area
+        self.pro_lower = tf.add(self.pro , cfgs.offset)
+        self.pred_anno_lower = tf.expand_dims(tf.argmax(self.pro_lower, dimension=3, name='pred_lower'), dim=3)
 
     #3. accuracy
     def calculate_acc(self, im, filenames, pred_anno, anno, gt_ellip_info):
@@ -100,16 +105,17 @@ class SeqFCNNet(FCNNet):
             heat_map = density_heatmap(self.vis_pred_prob[:, :, 1])
             utils.save_image(heat_map, self.re_save_dir_heat, name='heat_' + self.filename + '.jpg')
         if cfgs.trans_heat and cfgs.heatmap:
-            trans_heat_map = translucent_heatmap(self.vis_image.copy(), heat_map.astype(np.uint8).copy())
-            utils.save_image(trans_heat_map, self.re_save_dir_transheat, name='trans_heat_' + self.filenaem + '.jpg')
-        if cfgs.anno_fuse:
-            im_ = pred_visualize_choose_color(self.vis_image.copy(), (self.vis_pred+self.vis_pred_cur_max)).astype(np.uint8)
-            #im_ = pred_visualize_choose_color(im_, self.vis_pred_cur_max, [255,0,0]).astype(np.uint8)
+            trans_heat_map = translucent_heatmap(self.vis_image.astype(np.uint8).copy(), heat_map.astype(np.uint8).copy())
+            utils.save_image(trans_heat_map, self.re_save_dir_transheat, name='trans_heat_' + self.filename + '.jpg')
             utils.save_image(im_, self.re_save_dir_im, name='fuse_' + self.filename + '.jpg')
-        if cfgs.fuse_ellip:
-            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred+self.vis_pred_cur_max, axis=2).astype(np.uint8))
-            utils.save_image(im_ellip, self.re_save_dir_ellip, name='fuse_ellip_' + self.filename + '.jpg')
- 
+        if cfgs.lower_anno:
+            im_ = pred_visualize(self.vis_image.copy(), self.vis_pred_lower).astype(np.uint8)
+            utils.save_image(im_, self.re_save_dir_im, name='inp_lower_' + self.filename + '.jpg')
+        if cfgs.fit_ellip_lower:
+            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred_lower, axis=2).astype(np.uint8))
+            utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_lower' + self.filename + '.jpg')
+        
+            
 
     #Visualize the result
     def visualize(self, sess):
@@ -153,16 +159,16 @@ class SeqFCNNet(FCNNet):
             while True:
                 count += 1
                 images_, cur_ims_, filenames_ = sess.run([self.video_images, self.video_cur_ims, self.video_filenames])
-                pred_anno, pred_cur_max_anno, pred_prob = sess.run([self.pred_annotation, self.pred_cur_max_anno, self.pro], feed_dict={self.images: cur_ims_, self.mask_images: images_})
+                pred_anno, pred_prob, pred_anno_lower = sess.run([self.pred_annotation, self.pro, self.pred_anno_lower], feed_dict={self.images: images_})
                 pred_anno = np.squeeze(pred_anno, axis=3)
-                pred_cur_max_anno = np.squeeze(pred_cur_max_anno, axis=3)
+                pred_anno_lower = np.squeeze(pred_anno_lower)
 
                 for i in range(len(pred_anno)):
                     self.filename = filenames_[i].strip().decode('utf-8')
                     self.vis_image = cur_ims_[i]
                     self.vis_pred = pred_anno[i]
-                    self.vis_pred_cur_max = pred_cur_max_anno[i]
                     self.vis_pred_prob = pred_prob[i]
+                    self.vis_pred_lower = pred_anno_lower[i]
 
                     self.vis_one_im()
         except tf.errors.OutOfRangeError:

@@ -1,4 +1,4 @@
-#This is FCN for sequence
+#This is the base class FCN for sequence 
 from __future__ import print_function
 import tensorflow as tf
 import numpy as np
