@@ -17,8 +17,17 @@ def get_model_data(dir_path, model_url):
     filepath = os.path.join(dir_path, filename)
     if not os.path.exists(filepath):
         raise IOError("VGG Model not found!")
+    print(filepath)
     data = scipy.io.loadmat(filepath)
     return data
+
+def get_model_byname(dir_path, filename):
+    filepath = os.path.join(dir_path, filename)
+    if not os.path.exists(filepath):
+        raise IOError("VGG Model not found!")
+    data = scipy.io.loadmat(filepath)
+    return data
+
 
 
 def maybe_download_and_extract(dir_path, url_name, is_tarfile=False, is_zipfile=False):
@@ -94,8 +103,8 @@ def conv2d_basic(x, W, bias):
     return tf.nn.bias_add(conv, bias)
 
 
-def conv2d_strided(x, W, b):
-    conv = tf.nn.conv2d(x, W, strides=[1, 2, 2, 1], padding="SAME")
+def conv2d_strided(x, W, b, stride=2):
+    conv = tf.nn.conv2d(x, W, strides=[1, stride, stride, 1], padding="SAME")
     return tf.nn.bias_add(conv, b)
 
 
@@ -114,6 +123,14 @@ def conv2d_transpose_strided(x, W, b, output_shape=None, stride = 2):
 
 def leaky_relu(x, alpha=0.0, name=""):
     return tf.maximum(alpha * x, x, name)
+
+#Add by gp begin
+def max_pool(x, kernel_size, stride):
+    return tf.nn.max_pool(x, ksize=[1, kernel_size, kernel_size, 1], strides=[1, stride, stride, 1], padding="SAME")
+
+def avg_pool(x, kernel_size, stride):
+    return tf.nn.avg_pool(x, ksize=[1,kernel_size,kernel_size,1], strides=[1,stride,stride,1], padding='VALID')
+#Add by gURLd
 
 
 def max_pool_2x2(x):

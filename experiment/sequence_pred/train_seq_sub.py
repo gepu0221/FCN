@@ -17,12 +17,13 @@ from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_hea
 from generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
 import shutil
 
-from train_seq_parent import FCNNet
+#from train_seq_parent import FCNNet
+from train_seq_resnet_parent import Res101FCNNet as FCNNet
 
 try:
-    from .cfgs.config_train_m import cfgs
+    from .cfgs.config_train_resnet import cfgs
 except Exception:
-    from cfgs.config_train_m import cfgs
+    from cfgs.config_train_resnet import cfgs
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
@@ -30,6 +31,7 @@ NUM_OF_CLASSESS = cfgs.NUM_OF_CLASSESS
 IMAGE_SIZE = cfgs.IMAGE_SIZE
 
 class SeqFCNNet(FCNNet):
+#class SeqFCNNet(Res101FCNNet):
 
     def __init__(self, mode, max_epochs, batch_size, n_classes, train_records, valid_records, im_sz, init_lr, keep_prob, logs_dir):
 
@@ -74,8 +76,10 @@ class SeqFCNNet(FCNNet):
     def calculate_acc(self, im, filenames, pred_anno, anno, gt_ellip_info):
         with tf.name_scope('ellip_accu'):
             self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
-            #pred_anno = np.squeeze(pred_anno, axis=3)
             self.ellip_acc = accu.caculate_ellip_accu(im, filenames, pred_anno, gt_ellip_info)
+            #self.accu_iou = 0
+            #self.accu = 0
+            #self.ellip_acc = 0
     
     #5. build graph
     
@@ -130,13 +134,13 @@ class SeqFCNNet(FCNNet):
             total_loss = 0
             while True:
                 count += 1
-                images_, annos_, filenames_ = sess.run([self.vis_images, self.vis_annotations, self.vis_filenames])
-                pred_anno, pred_prob = sess.run([self.pred_annotation, self.cur_pro], feed_dict={self.images: cur_ims_, self.mask_images: images_})
+                images_, cur_ims, annos_, filenames_ = sess.run([self.vis_images, self.vis_cur_images, self.vis_annotations, self.vis_filenames])
+                pred_anno, pred_prob = sess.run([self.pred_annotation, self.pro], feed_dict={self.images: images_})
                 pred_anno = np.squeeze(pred_anno, axis=3)
                 
                 for i in range(len(pred_anno)):
                     self.filename = filenames_[i].strip().decode('utf-8')
-                    self.vis_image = cur_ims_[i]
+                    self.vis_image = cur_ims[i]
                     self.vis_anno = annos_[i]
                     self.vis_pred = pred_anno[i]
                     self.vis_pred_prob = pred_prob[i]
@@ -190,10 +194,19 @@ class SeqFCNNet(FCNNet):
             while count<self.per_e_valid_batch:
                 count +=1
                 images_, ellip_infos_, annos_, filenames = sess.run([self.valid_images, self.valid_ellip_infos, self.valid_annotations, self.valid_filenames])
-                pred_anno, summary_str, loss= sess.run(
-                fetches=[self.pred_annotation, self.summary_op, self.loss],
+                pred_anno, pred_seq_pro, summary_str, loss= sess.run(
+                fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss],
                 feed_dict={self.images: images_, 
                            self.annotations: annos_, self.lr: self.learning_rate})
+
+                #pred_anno = np.squeeze(pred_anno, axis=3)
+                if count % 10 == 0:
+                    choosen = random.randint(0, self.batch_size-1)
+                    fn = filenames[choosen].strip().decode('utf-8')
+                    pred_anno_im = (pred_anno[choosen]*255).astype(np.uint8)
+                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_val_'+fn+'.bmp'), pred_anno_im)
+                    heat_map = density_heatmap(pred_seq_pro[choosen, :, :, 1])
+                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_val_heatseq_'+fn+'.bmp'), heat_map)
 
 
                 writer.add_summary(summary_str, global_step=step)
@@ -203,11 +216,11 @@ class SeqFCNNet(FCNNet):
                 sum_acc_ellip += self.ellip_acc
                 total_loss += loss
                 print('\r' + 12 * ' ', end='')
-                print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
+                print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
         
             #End valid data
             #count -= 1
-            print('epoch %5d\t learning_rate = %g\t loss = %.3f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % 
+            print('epoch %5d\t learning_rate = %g\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % 
             (epoch, self.learning_rate, total_loss/count, sum_acc/count, sum_acc_iou/count, sum_acc_ellip/count))
             print('Take time %3.1f' % (time.time() - t0))
 
@@ -247,9 +260,9 @@ class SeqFCNNet(FCNNet):
                     choosen = random.randint(0, self.batch_size-1)
                     fn = filenames[choosen].strip().decode('utf-8')
                     pred_anno_im = (pred_anno[choosen]*255).astype(np.uint8)
-                    cv2.imwrite(os.path.join('image', 'seq_only', str(step)+'_'+fn+'.bmp'), pred_anno_im)
+                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_'+fn+'.bmp'), pred_anno_im)
                     heat_map = density_heatmap(pred_seq_pro[choosen, :, :, 1])
-                    cv2.imwrite(os.path.join('image', 'seq_only', str(step)+'_heatseq_'+fn+'.bmp'), heat_map)
+                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_heatseq_'+fn+'.bmp'), heat_map)
 
                 #2. calculate accurary
                 self.calculate_acc(cur_ims.copy(), filenames, pred_anno, annos_, ellip_infos_)
@@ -274,11 +287,11 @@ class SeqFCNNet(FCNNet):
 
                 #6. print
                 #print('\r' + 2 * ' ', end='')
-                print('epoch %5d\t lr = %g\t step = %4d\t count = %4d\t loss = %.3f\t mean_loss=%.3f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f\t time = %.2f' % (epoch, self.learning_rate, step, count, loss, (total_loss/count), mean_acc, mean_acc_iou, mean_acc_ellip, time_per_batch))
+                print('epoch %5d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t mean_loss=%.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f\t time = %.2f' % (epoch, self.learning_rate, step, count, loss, (total_loss/count), mean_acc, mean_acc_iou, mean_acc_ellip, time_per_batch))
             
             #End one epoch
             #count -= 1
-            print('epoch %5d\t learning_rate = %g\t mean_loss = %.3f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
+            print('epoch %5d\t learning_rate = %g\t mean_loss = %.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
             print('Take time %3.1f' % (time.time() - t0))
 
         except tf.errors.OutOfRangeError:

@@ -7,6 +7,7 @@ import math
 import os
 import cv2
 import TensorflowUtils as utils
+import G_Layers as utils_layers
 import read_data as scene_parsing
 import datetime
 import pdb
@@ -19,16 +20,16 @@ from generate_heatmap import density_heatmap, density_heatmap_br, translucent_he
 import shutil
 
 try:
-    from .cfgs.config_train_m import cfgs
+    from .cfgs.config_train_resnet import cfgs
 except Exception:
-    from cfgs.config_train_m import cfgs
+    from cfgs.config_train_resnet import cfgs
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
 NUM_OF_CLASSESS = cfgs.NUM_OF_CLASSESS
 IMAGE_SIZE = cfgs.IMAGE_SIZE
 
-class FCNNet(object):
+class Res101FCNNet(object):
 
     def __init__(self, mode, max_epochs, batch_size, n_classes, train_records, valid_records, im_sz, init_lr, keep_prob, logs_dir):
         self.max_epochs = max_epochs
@@ -57,6 +58,11 @@ class FCNNet(object):
         self.at = cfgs.at
         self.gamma = cfgs.gamma
 
+        #init Resnet
+        model_data = utils.get_model_byname(cfgs.model_dir, cfgs.MODEL_NAME)
+        weights = np.squeeze(model_data['params'][0])
+        self.resnet = utils_layers.Resnet_gp(cfgs.num_units_list, cfgs.first_stride_list, weights=weights, n=4)
+
         
     #1. get data
     def get_data_cache(self):
@@ -76,133 +82,62 @@ class FCNNet(object):
         with tf.device('/cpu:0'):
             self.video_images, self.video_cur_ims, self.video_filenames, self.video_init = get_data_video(self.valid_records, self.batch_size)
 
-    #2. net
-    def vgg_net(self, weights, image):
-        layers = (
-            #'conv1_1', 'relu1_1',
-            'conv1_2', 'relu1_2', 'pool1',
-
-            'conv2_1', 'relu2_1', 'conv2_2', 'relu2_2', 'pool2',
-
-            'conv3_1', 'relu3_1', 'conv3_2', 'relu3_2', 'conv3_3',
-            'relu3_3', 'conv3_4', 'relu3_4', 'pool3',
-
-            'conv4_1', 'relu4_1', 'conv4_2', 'relu4_2', 'conv4_3',
-            'relu4_3', 'conv4_4', 'relu4_4', 'pool4',
-
-            'conv5_1', 'relu5_1', 'conv5_2', 'relu5_2', 'conv5_3',
-            'relu5_3', 'conv5_4', 'relu5_4'
-        )
-
-        net = {}
-        current = image
-        for i, name in enumerate(layers):
-            kind = name[:4]
-            if kind == 'conv':
-                kernels, bias = weights[i+2][0][0][0][0]
-                # matconvnet: weights are [width, height, in_channels, out_channels]
-                # tensorflow: weights are [height, width, in_channels, out_channels]
-                kernels = utils.get_variable(np.transpose(kernels, (1, 0, 2, 3)), name=name + "_w")
-                bias = utils.get_variable(bias.reshape(-1), name=name + "_b")
-                current = utils.conv2d_basic(current, kernels, bias)
-            elif kind == 'relu':
-                current = tf.nn.relu(current, name=name)
-            elif kind == 'pool':
-                current = utils.avg_pool_2x2(current)
-            net[name] = current
-
-        return net
-
-    
-    def inference(self, images, inference_name, channel,  keep_prob):
+    #2. net 
+    def inference(self, images, inference_name, channel, keep_prob):
         """
         Semantic segmentation network definition
         :param image: input image. Should have values in range 0-255
         :param keep_prob:
         :return:
         """
-        print("setting up vgg initialized conv layers ...")
-        model_data = utils.get_model_data(cfgs.model_dir, MODEL_URL)
+        print("setting up resnet101 initialized conv layers ...")
+        #mean_pixel = np.mean(mean, axis=(0, 1))
 
-        mean = model_data['normalization'][0][0][0]
-        mean_pixel = np.mean(mean)
-        self.mean_ = mean_pixel
-        weights = np.squeeze(model_data['layers'])
+        processed_images = utils.process_image(images, cfgs.mean_pixel)
 
-        #processed_image = utils.process_image(self.images, mean_pixel)
-
-        #with tf.variable_scope("inference"):
         with tf.variable_scope(inference_name):
-            #W1 = utils.weight_variable([3, 3, channel, 64], name="W1")
-            #b1 = utils.bias_variable([64], name="b1")
-            #conv1 = utils.conv2d_basic(images, W1, b1)
-            #conv1 = utils.conv2d_basic(processed_image, W1, b1)
-            #relu1 = tf.nn.relu(conv1, name='relu1')
-            #check if stride=1
-            conv1 = utils_layers.conv2d_layer(images, name='1', [3, 3, channel, 64], pool_=0, if_relu=True, stride=1)
-            #pretrain
-            image_net = self.vgg_net(weights, conv1)
             
-            conv_final_layer = image_net["conv5_3"]
-            print('vgg shape', conv_final_layer.get_shape())
+            conv1 = utils_layers.conv2d_layer(processed_images, '1',  [7, 7, channel, 64], pool_=3)
+            #Resnet
+            conv_final_layer, image_net = self.resnet.resnet_op(conv1, if_avg_pool=0)
 
-            pool5 = utils.max_pool_2x2(conv_final_layer)
+            #dropout
+            conv_final_layer = tf.nn.dropout(conv_final_layer, keep_prob)
+            W_last = utils.weight_variable([1, 1, 2048, 2], name='W_last')
+            b_last = utils.bias_variable([2], name='b8')
+            conv_last = utils.conv2d_basic(conv_final_layer, W_last, b_last)
+            print('conv_last: ', conv_last.get_shape())
+            #Deconv operator
+            #conv_t1 = utils_layers.deconv2d_layer(conv_last, 't1', [4,4,1024,2], [self.batch_size, 14, 14, 1024])
+            conv_t1 = utils_layers.deconv2d_layer(conv_last, 't1', [4,4,1024,2], output_shape=tf.shape(image_net['block3_b22']))
+ 
+            print('conv_t1: ', conv_t1.get_shape())
+            fuse_1 = tf.add(conv_t1, image_net['block3_b22'], name="fuse_1")
 
-            #W6 = utils.weight_variable([7, 7, 512, 4096], name="W6")
-            #b6 = utils.bias_variable([4096], name="b6")
-            #conv6 = utils.conv2d_basic(pool5, W6, b6)
-            #relu6 = tf.nn.relu(conv6, name="relu6")
-            conv6 = utils_layers.conv2d_layer(pool5, name='6', W_s=[7, 7, 512, 4096], pool_=0, if_relu=True, stride=1)
-            #Dropout
-            relu_dropout6 = tf.nn.dropout(conv6, keep_prob=keep_prob)
+            #conv_t2 = utils_layers.deconv2d_layer(fuse_1, 't2', [4,4,512,1024], [self.batch_size, 28, 28, 512])
+            conv_t2 = utils_layers.deconv2d_layer(fuse_1, 't2', [4,4,512,1024], output_shape=tf.shape(image_net['block2_b3']))
+            print('conv_t2: ', conv_t2.get_shape())
+            fuse_2 = tf.add(conv_t2, image_net['block2_b3'], name="fuse_2")
+              
+            #conv_t3 = utils_layers.deconv2d_layer(fuse_2, 't3', [4,4,256,512], [self.batch_size, 56, 56, 256])
+            conv_t3 = utils_layers.deconv2d_layer(fuse_2, 't3', [4,4,256,512], output_shape=tf.shape(image_net['block1_b2']))
 
-            W7 = utils.weight_variable([1, 1, 4096, 4096], name="W7")
-            b7 = utils.bias_variable([4096], name="b7")
-            conv7 = utils.conv2d_basic(relu_dropout6, W7, b7)
-            relu7 = tf.nn.relu(conv7, name="relu7")
-            '''
-            if cfgs.debug:
-                utils.add_activation_summary(relu7)'''
-            relu_dropout7 = tf.nn.dropout(relu7, keep_prob=keep_prob)
-            print('relu_dropout7', relu_dropout7.get_shape())
-            W8 = utils.weight_variable([1, 1, 4096, NUM_OF_CLASSESS], name="W8")
-            b8 = utils.bias_variable([NUM_OF_CLASSESS], name="b8")
-            conv8 = utils.conv2d_basic(relu_dropout7, W8, b8)
-            # annotation_pred1 = tf.argmax(conv8, dimension=3, name="prediction1")
-            print('conv8 shape', conv8.shape)
+            print('conv_t3: ', conv_t3.get_shape())
+            fuse_3 = tf.add(conv_t3, image_net['block1_b2'], name='fuse_3')
 
-
-            # now to upscale to actual image size
-            deconv_shape1 = image_net["pool4"].get_shape()
-            print('deconv_shape1', deconv_shape1[3].value)
-            print('shape of pool4',image_net['pool4'].get_shape())
-            W_t1 = utils.weight_variable([4, 4, deconv_shape1[3].value, NUM_OF_CLASSESS], name="W_t1")
-            b_t1 = utils.bias_variable([deconv_shape1[3].value], name="b_t1")
-            conv_t1 = utils.conv2d_transpose_strided(conv8, W_t1, b_t1, output_shape=tf.shape(image_net["pool4"]))
-            print('conv_t1', conv_t1.get_shape())
-            fuse_1 = tf.add(conv_t1, image_net["pool4"], name="fuse_1")
-
-            deconv_shape2 = image_net["pool3"].get_shape()
-            print('deconv_shape2', deconv_shape2[3].value)
-            print('shape of pool3',image_net['pool3'].get_shape)
-            W_t2 = utils.weight_variable([4, 4, deconv_shape2[3].value, deconv_shape1[3].value], name="W_t2")
-            b_t2 = utils.bias_variable([deconv_shape2[3].value], name="b_t2")
-            conv_t2 = utils.conv2d_transpose_strided(fuse_1, W_t2, b_t2, output_shape=tf.shape(image_net["pool3"]))
-            print('conv_t2', conv_t2.get_shape())
-            fuse_2 = tf.add(conv_t2, image_net["pool3"], name="fuse_2")
-
+            #conv_t4 = utils_layers.deconv2d_layer(fuse_3, 't4', [16, 16, 2, 256], output_shape=[self.batch_size, 224, 224, 2], stride=8)
             shape = tf.shape(images)
-            deconv_shape3 = tf.stack([shape[0], shape[1], shape[2], NUM_OF_CLASSESS])
-            W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
-            b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
-            conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=8)
-            print('conv_t3', conv_t3.get_shape())
+            conv_t4 = utils_layers.deconv2d_layer(fuse_3, 't4', [16, 16, 2, 256], output_shape=[shape[0], shape[1], shape[2], 2], stride=4)
+ 
+            print('conv_t3: ', conv_t4.get_shape())
+            annotation_pred = tf.argmax(conv_t4, dimension=3, name="prediction")
 
-            annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
+            logits = conv_t4
+            print('logits shape', logits.shape)
 
-        #self.pred_annotation = tf.expand_dims(annotation_pred, dim=3)
-        #self.logits = conv_t3
-        return conv_t3
+
+        return logits
+     
 
     def infer(self):
         self.logits = self.inference(self.images, 'inference_name', 7, self.keep_prob )
@@ -411,39 +346,4 @@ class FCNNet(object):
 
                 self.vis_video_once(sess)
 
-#-------------------------------------------------------------------------------
-
-#Main function
-def main():
- 
-    with tf.device('/gpu:0'):
-        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
-        print('The number of train records is %d and valid records is %d.' % (len(train_records), len(valid_records)))
-        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
-        model.build()
-        model.train()
-
-def vis_main():
-    with tf.device('/gpu:0'):
-        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
-        print('The number of valid records is %d.' %  len(valid_records))
-        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
-        model.build_vis()
-        model.vis()
-
-def video_main():
-    with tf.device('/gpu:0'):
-        train_records, valid_records = scene_parsing.my_read_video_dataset(cfgs.seq_list_path, cfgs.anno_path)
-        print('The number of video records is %d.' %  len(valid_records))
-        model = FCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob)
-        model.build_video()
-        model.vis_video()
-
-if __name__ == '__main__':
-    if cfgs.mode == 'train':
-        main()
-    elif cfgs.mode == 'visualize':
-        vis_main()
-    elif cfgs.mode == 'vis_video':
-        video_main()
 
