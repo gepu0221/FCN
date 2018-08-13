@@ -10,7 +10,8 @@ import TensorflowUtils as utils
 import read_data as scene_parsing
 import datetime
 import pdb
-from BatchReader_multi_ellip import *
+#from BatchReader_multi_ellip import *
+from BatchReader_multi_da import *
 import CaculateAccurary as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
@@ -31,7 +32,6 @@ NUM_OF_CLASSESS = cfgs.NUM_OF_CLASSESS
 IMAGE_SIZE = cfgs.IMAGE_SIZE
 
 class SeqFCNNet(FCNNet):
-#class SeqFCNNet(Res101FCNNet):
 
     def __init__(self, mode, max_epochs, batch_size, n_classes, train_records, valid_records, im_sz, init_lr, keep_prob, logs_dir):
 
@@ -39,15 +39,15 @@ class SeqFCNNet(FCNNet):
 
         #mask
         self.seq_num = cfgs.seq_num
-        self.channel = 3+self.seq_num
+        self.channel = 1+self.seq_num
         self.inference_name = 'inference'
-        self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, cfgs.seq_num+3], name='input_image')
+        self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, cfgs.seq_num+1], name='input_image')
         
     #1. get data
     def get_data_cache(self):
         with tf.device('/cpu:0'):
-            self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames = get_data_cache(self.train_records, self.batch_size, False, 'get_data_train_mask')
-            self.valid_images, self.valid_cur_ims, self.valid_ellip_infos, self.valid_annotations, self.valid_filenames = get_data_cache(self.valid_records, self.batch_size, False, 'get_data_valid_mask')
+            self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames = get_data_cache_da(self.train_records, self.batch_size, False, 'get_data_train_mask')
+            self.valid_images, self.valid_cur_ims, self.valid_ellip_infos, self.valid_annotations, self.valid_filenames = get_data_cache_da(self.valid_records, self.batch_size, False, 'get_data_valid_mask')
 
     def get_data_vis(self):
         with tf.device('/cpu:0'):
@@ -75,11 +75,11 @@ class SeqFCNNet(FCNNet):
     #3. accuracy
     def calculate_acc(self, im, filenames, pred_anno, anno, gt_ellip_info):
         with tf.name_scope('ellip_accu'):
-            self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
-            self.ellip_acc = accu.caculate_ellip_accu(im, filenames, pred_anno, gt_ellip_info)
-            #self.accu_iou = 0
-            #self.accu = 0
-            #self.ellip_acc = 0
+            #self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
+            #self.ellip_acc = accu.caculate_ellip_accu(im, filenames, pred_anno, gt_ellip_info)
+            self.accu_iou = 0
+            self.accu = 0
+            self.ellip_acc = 0
     
     #5. build graph
     
@@ -103,7 +103,9 @@ class SeqFCNNet(FCNNet):
             im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
             utils.save_image(im_, self.re_save_dir_im, name='inp_' + self.filename + '.jpg')
         if cfgs.fit_ellip:
+            #im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
             im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
+            
             utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
         if cfgs.heatmap:
             heat_map = density_heatmap(self.vis_pred_prob[:, :, 1])
@@ -193,7 +195,7 @@ class SeqFCNNet(FCNNet):
             #self.per_e_valid_batch = 2
             while count<self.per_e_valid_batch:
                 count +=1
-                images_, ellip_infos_, annos_, filenames = sess.run([self.valid_images, self.valid_ellip_infos, self.valid_annotations, self.valid_filenames])
+                images_, cur_ims, ellip_infos_, annos_, filenames = sess.run([self.valid_images, self.valid_cur_ims, self.valid_ellip_infos, self.valid_annotations, self.valid_filenames])
                 pred_anno, pred_seq_pro, summary_str, loss= sess.run(
                 fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss],
                 feed_dict={self.images: images_, 
@@ -210,7 +212,7 @@ class SeqFCNNet(FCNNet):
 
 
                 writer.add_summary(summary_str, global_step=step)
-                self.calculate_acc(images_[:,:,:,0:4].copy(), filenames, pred_anno, annos_, ellip_infos_)
+                self.calculate_acc(cur_ims.copy(), filenames, pred_anno, annos_, ellip_infos_)
                 sum_acc += self.accu
                 sum_acc_iou += self.accu_iou
                 sum_acc_ellip += self.ellip_acc
@@ -256,6 +258,7 @@ class SeqFCNNet(FCNNet):
 
 
                 #pred_anno = np.squeeze(pred_anno, axis=3)
+                '''
                 if count % 10 == 0:
                     choosen = random.randint(0, self.batch_size-1)
                     fn = filenames[choosen].strip().decode('utf-8')
@@ -263,6 +266,15 @@ class SeqFCNNet(FCNNet):
                     cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_'+fn+'.bmp'), pred_anno_im)
                     heat_map = density_heatmap(pred_seq_pro[choosen, :, :, 1])
                     cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_heatseq_'+fn+'.bmp'), heat_map)
+
+                '''
+                choosen = random.randint(0, self.batch_size-1)
+                fn = filenames[choosen].strip().decode('utf-8')
+                anno_im = (annos_[choosen]*255).astype(np.uint8)
+                cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_'+fn+'.bmp'), anno_im)
+                im = images_[choosen,:,:,0]
+                cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_heatseq_'+fn+'.bmp'), im)
+
 
                 #2. calculate accurary
                 self.calculate_acc(cur_ims.copy(), filenames, pred_anno, annos_, ellip_infos_)
@@ -304,8 +316,73 @@ class SeqFCNNet(FCNNet):
     
     
 
+    def generate_train_one_epoch(self, sess):
+        try:
+            count = 0
+            while count<self.per_e_train_batch:
+                count += 1
+                images_, cur_ims, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_filenames])
 
-#-------------------------------------------------------------------------------
+                pred_anno = sess.run(self.pred_annotation,
+                                      feed_dict={self.images: images_})
+                len_ = len(images_)
+                for i in range(len_):
+                    fn = filenames[i].strip().decode('utf-8')
+                    pred_anno_im = pred_anno[i]
+                    pred_anno_im = (np.concatenate((pred_anno_im, pred_anno_im, pred_anno_im), axis=2)).astype(np.uint8)
+                    #print(pred_anno_im.shape)
+                    cv2.imwrite(os.path.join(cfgs.re_path, fn+'.bmp'), pred_anno_im)
+
+        except tf.errors.OutOfRangeError:
+            print('Error!')
+     
+    def generate_valid_one_epoch(self, sess):
+        try:
+            count = 0
+            while count<self.per_e_valid_batch:
+                count += 1
+                images_, cur_ims, filenames = sess.run([self.valid_images, self.valid_cur_ims, self.valid_filenames])
+
+                pred_anno = sess.run(self.pred_annotation,
+                                      feed_dict={self.images: images_})
+                len_ = len(images_)
+                for i in range(len_):
+                    fn = filenames[i].strip().decode('utf-8')
+                    pred_anno_im = pred_anno[i]
+                    pred_anno_im = (np.concatenate((pred_anno_im, pred_anno_im, pred_anno_im), axis=2)).astype(np.uint8)
+                    cv2.imwrite(os.path.join(cfgs.re_path, fn+'.bmp'), pred_anno_im)
+
+
+        except tf.errors.OutOfRangeError:
+            print('Error!')
+    
+    def generate(self):
+        if not os.path.exists(self.logs_dir):
+            print("The logs path '%s' is not found" % self.logs_dir)
+            print("Create now..")
+            os.makedirs(self.logs_dir)
+            print("%s is created successfully!" % self.logs_dir)
+        if not os.path.exists(cfgs.re_path):
+            print("The result recover path %s is not found" % cfgs.re_path)
+            print("Create now..")
+            os.makedirs(cfgs.re_path)
+            print("%s is created successfilly!" % cfgs.re_path)
+
+        config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+        with tf.device('/gpu:0'):
+            with tf.Session(config=config) as sess:
+                #1. initialize all variables
+                sess.run(tf.global_variables_initializer())
+
+                #2. Try to recover model
+                saver = self.recover_model(sess)
+
+                #3. Generate result data.
+                self.generate_train_one_epoch(sess)
+                self.generate_valid_one_epoch(sess)
+
+
+#------------------------------------------------------------------------------
 
 #Main function
 def main():
@@ -333,6 +410,16 @@ def video_main():
         model.build_video()
         model.vis_video()
 
+def generate_main():
+    with tf.device('/gpu:0'):
+        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print('The number of train records is %d and valid records is %d.' % (len(train_records), len(valid_records)))
+        model = SeqFCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob, cfgs.logs_dir)
+        model.build()
+        model.generate()
+
+
+
 if __name__ == '__main__':
     if cfgs.mode == 'train':
         main()
@@ -340,4 +427,6 @@ if __name__ == '__main__':
         vis_main()
     elif cfgs.mode == 'vis_video':
         video_main()
+    elif cfgs.mode == 'generate_re':
+        generate_main()
 

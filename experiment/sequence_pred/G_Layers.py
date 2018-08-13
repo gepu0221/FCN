@@ -23,6 +23,7 @@ def deconv2d_layer(x, name, W_s, output_shape=None, stride = 2):
     W_t = utils.weight_variable(W_s, name='W_'+name )
     b_t = utils.weight_variable([W_s[2]], name='b_'+name)
     conv_t = utils.conv2d_transpose_strided(x, W_t, b_t, output_shape, stride)
+    print('conv_%s: '%name, conv_t.get_shape())
 
     return conv_t
 
