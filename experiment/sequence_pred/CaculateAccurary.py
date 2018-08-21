@@ -3,6 +3,7 @@ import cv2
 import time 
 import pdb
 import os
+from generate_heatmap import density_heatmap
 
 try:
     from .cfgs.config_acc import cfgs
@@ -79,8 +80,17 @@ def caculate_soft_accurary(pred_anno, anno, prob_thresh):
     
     return accu_iou,accu_pixel 
 
+#Create ellipse error related folder.
+def create_ellipse_f():
+    train_error_path = cfgs.error_path
+    valid_error_path = cfgs.error_path+'_valid'
+    if not os.path.exists(train_error_path):
+        os.makedirs(train_error_path)
+    if not os.path.exists(valid_error_path):
+        os.makedirs(valid_error_path)
+
 #generate ellipse to compare ellispes info
-def caculate_ellip_accu_once(im, filename, pred, gt_ellip):
+def caculate_ellip_accu_once(im, filename, pred, pred_pro, gt_ellip, if_valid=False):
 #gt_ellipse [(x,y), w, h]
     pts = []
     #pdb.set_trace()
@@ -104,20 +114,31 @@ def caculate_ellip_accu_once(im, filename, pred, gt_ellip):
     
     loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2))
     #save worse result
+    if if_valid:
+        error_path = cfgs.error_path+'_valid'
+    else:
+        error_path = cfgs.error_path
+
     if loss > cfgs.loss_thresh:
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
         cv2.ellipse(im,ellipse_info,(0,255,0),1)
         gt_ellip_info = (tuple(np.array([gt_ellip[0], gt_ellip[1]])), tuple(np.array([gt_ellip[2], gt_ellip[3]])), 0)
         cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
-        path_ = os.path.join(cfgs.error_path, filename.strip().decode('utf-8')+'.bmp')
+        path_ = os.path.join(error_path, filename.strip().decode('utf-8')+'_'+str(int(loss))+'.bmp')
         cv2.imwrite(path_, im)
+
+        #heatmap
+        heat_map = density_heatmap(pred_pro[:, :, 1])
+        cv2.imwrite(os.path.join(error_path, filename.strip().decode('utf-8')+'_heatseq_.bmp'), heat_map)
+
+
 
     return loss
 
-def caculate_ellip_accu(im, filenames, pred, gt_ellip):
+def caculate_ellip_accu(im, filenames, pred, pred_pro, gt_ellip, if_valid=False):
     sz_ = pred.shape
     loss = 0
     for i in range(sz_[0]):
-        loss += caculate_ellip_accu_once(im[i], filenames[i], pred[i].astype(np.uint8), gt_ellip[i])
+        loss += caculate_ellip_accu_once(im[i], filenames[i], pred[i].astype(np.uint8), pred_pro[i], gt_ellip[i], if_valid)
 
     return loss

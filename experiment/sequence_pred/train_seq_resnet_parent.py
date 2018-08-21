@@ -97,7 +97,7 @@ class Res101FCNNet(object):
 
         with tf.variable_scope(inference_name):
             
-            conv1 = utils_layers.conv2d_layer(processed_images, '1',  [7, 7, channel, 64], pool_=3)
+            conv1 = utils_layers.conv2d_layer(processed_images, '1',  [7, 7, cfgs.cur_channel+cfgs.seq_num, 64], pool_=3)
             #Resnet
             conv_final_layer, image_net = self.resnet.resnet_op(conv1, if_avg_pool=0)
 
@@ -108,28 +108,19 @@ class Res101FCNNet(object):
             conv_last = utils.conv2d_basic(conv_final_layer, W_last, b_last)
             print('conv_last: ', conv_last.get_shape())
             #Deconv operator
-            #conv_t1 = utils_layers.deconv2d_layer(conv_last, 't1', [4,4,1024,2], [self.batch_size, 14, 14, 1024])
+            #1. output_shape=[self.batch_size, 14, 14, 1024]
             conv_t1 = utils_layers.deconv2d_layer(conv_last, 't1', [4,4,1024,2], output_shape=tf.shape(image_net['block3_b22']))
- 
-            print('conv_t1: ', conv_t1.get_shape())
             fuse_1 = tf.add(conv_t1, image_net['block3_b22'], name="fuse_1")
-
-            #conv_t2 = utils_layers.deconv2d_layer(fuse_1, 't2', [4,4,512,1024], [self.batch_size, 28, 28, 512])
+            #2. output_shape=[self.batch_size, 28, 28, 512]
             conv_t2 = utils_layers.deconv2d_layer(fuse_1, 't2', [4,4,512,1024], output_shape=tf.shape(image_net['block2_b3']))
-            print('conv_t2: ', conv_t2.get_shape())
             fuse_2 = tf.add(conv_t2, image_net['block2_b3'], name="fuse_2")
-              
-            #conv_t3 = utils_layers.deconv2d_layer(fuse_2, 't3', [4,4,256,512], [self.batch_size, 56, 56, 256])
+            #3. output_shape = [self.batch_size, 56, 56, 256]
             conv_t3 = utils_layers.deconv2d_layer(fuse_2, 't3', [4,4,256,512], output_shape=tf.shape(image_net['block1_b2']))
-
-            print('conv_t3: ', conv_t3.get_shape())
             fuse_3 = tf.add(conv_t3, image_net['block1_b2'], name='fuse_3')
-
-            #conv_t4 = utils_layers.deconv2d_layer(fuse_3, 't4', [16, 16, 2, 256], output_shape=[self.batch_size, 224, 224, 2], stride=8)
+            #4. output_shape=[self.batch_size, 224, 224, 2]
             shape = tf.shape(images)
             conv_t4 = utils_layers.deconv2d_layer(fuse_3, 't4', [16, 16, 2, 256], output_shape=[shape[0], shape[1], shape[2], 2], stride=4)
  
-            print('conv_t3: ', conv_t4.get_shape())
             annotation_pred = tf.argmax(conv_t4, dimension=3, name="prediction")
 
             logits = conv_t4
