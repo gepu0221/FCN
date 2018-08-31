@@ -63,6 +63,13 @@ class Res101FCNNet(object):
         weights = np.squeeze(model_data['params'][0])
         self.resnet = utils_layers.Resnet_gp(cfgs.num_units_list, cfgs.first_stride_list, weights=weights, n=4)
 
+        #Hausdorff distance
+        self.pos_m = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1, 2], name='position_matrix')
+        self.gt_key = tf.placeholder(tf.int32, shape=[None, 1, 1, None, 2], name='gt_key_point')
+        self.max_dist = math.sqrt(self.IMAGE_SIZE**2 + self.IMAGE_SIZE**2)
+        self.eps = cfgs.eps
+        self.alpha = cfgs.alpha
+
         
     #1. get data
     def get_data_cache(self):
@@ -161,7 +168,35 @@ class Res101FCNNet(object):
                                                                                        labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                                        name="entropy"))
 
+    
+    #4.1 weighted-hausdorff-loss
+    def h_loss(self):
+        '''
+        Args:Compute weighted Hausdorff Distance function
+        between the estimated probalility map and ground truth points.
+        '''
+        repeat_num = tf.shape(self.gt_key)[0]
+        normalized_x = tf.tile(self.pos_m, [1,1,1,repeat_num,1])
+        normalized_y = tf.tile(self.gt_key, [1, self.IMAGE_SIZE, self.IMAGE_SIZE, 1,1])
         
+        differences = tf.subtract(normalized_x, normalized_y)
+        d_matrix = tf.cast(tf.reduce_sum(tf.pow(differences, 2), 4), tf.float32)
+        
+        p_est_pts = tf.reduce_sum(self.pro)
+
+        #unstack to get dim=1 pro
+        _, p_ = tf.unstack(self.pro, axis = 3)
+        sum_1 = tf.reduce_sum(p_ * tf.cast(tf.reduce_min(d_matrix, 3), dtype=tf.float32))
+        term_1 = (1 / (p_est_pts + self.eps) * sum_1 )
+        
+        d_div_p = tf.reduce_min(((d_matrix + self.eps) / (tf.pow(p_, self.alpha) + self.eps)), (1,2))
+        d_div_p = tf.minimum(d_div_p, self.max_dist)
+        d_div_p = tf.maximum(d_div_p, 0)
+        term_2 = tf.reduce_mean(d_div_p)
+
+        self.h_loss = tf.add(term_1, term_2)
+        pdb.set_trace()
+
     #5. evaluation
     def calculate_acc(self, pred_anno, anno):
         with tf.name_scope('accu'):

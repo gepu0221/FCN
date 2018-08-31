@@ -78,11 +78,11 @@ class SeqFCNNet(FCNNet):
     #3. accuracy
     def calculate_acc(self, im, filenames, pred_anno, pred_pro, anno, gt_ellip_info, if_valid=False):
         with tf.name_scope('ellip_accu'):
-            #self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
-            #self.ellip_acc = accu.caculate_ellip_accu(im, filenames, pred_anno, pred_pro, gt_ellip_info, if_valid)
-            self.accu_iou = 0
-            self.accu = 0
-            self.ellip_acc = 0
+            self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
+            self.ellip_acc = accu.caculate_ellip_accu(im, filenames, pred_anno, pred_pro, gt_ellip_info, if_valid)
+            #self.accu_iou = 0
+            #self.accu = 0
+            #self.ellip_acc = 0
     
     #5. build graph
     
@@ -100,6 +100,11 @@ class SeqFCNNet(FCNNet):
         self.get_data_video()
         self.loss()
     
+    def build_h_loss(self):
+        self.get_data_cache()
+        self.loss()
+        self.h_loss()
+
     #6. else
     def vis_one_im(self):
         if cfgs.anno:
@@ -206,7 +211,7 @@ class SeqFCNNet(FCNNet):
                            self.annotations: annos_, self.lr: self.learning_rate})
 
                 #pred_anno = np.squeeze(pred_anno, axis=3)
-                
+                '''
                 if count % 10 == 0:
                     choosen = random.randint(0, self.batch_size-1)
                     fn = filenames[choosen].strip().decode('utf-8')
@@ -226,7 +231,7 @@ class SeqFCNNet(FCNNet):
                     cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'val_im_seq2'+fn+'.bmp'), im)
                     im = images_[choosen,:,:,self.cur_channel+3]
                     cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'val_im_seq3'+fn+'.bmp'), im)
-                
+                '''
 
 
                 writer.add_summary(summary_str, global_step=step)
@@ -251,99 +256,7 @@ class SeqFCNNet(FCNNet):
 
     
     
-    def train_one_da_epoch(self, sess, writer, epoch, step):
-        print('sub_train_one_epoch')
-        sum_acc = 0
-        sum_acc_iou = 0
-        sum_acc_ellip = 0
-        count = 0
-        total_loss = 0
-        t0 =time.time()
-        mean_acc = 0
-        mean_acc_iou = 0
-        mean_acc_ellip = 0
-        try:
-            #self.per_e_train_batch = 2
-            while count<self.per_e_train_batch:
-                step += 1
-                count += 1
-                #1. train
-                images_da, cur_ims_da, annos_da, filenames = sess.run([self.train_da_images, self.train_da_cur_ims, self.train_da_annotations, self.train_da_filenames])
-                
-                pred_anno_da, pred_seq_pro_da, loss_da, _ = sess.run([self.pred_annotation, self.pro, self.loss, self.train_op],
-                                                            feed_dict={self.images: images_da, 
-                                                                       self.annotations: annos_da, self.lr: self.learning_rate})
-
-
-                images_, cur_ims, ellip_infos_, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames])
-                
-                pred_anno, pred_seq_pro, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
-                                                            feed_dict={self.images: images_, 
-                                                                       self.annotations: annos_, self.lr: self.learning_rate})
-
-
-                
-                if count % 10 == 0:
-                    choosen = random.randint(0, self.batch_size-1)
-                    fn = filenames[choosen].strip().decode('utf-8')
-                    pred_anno_im = (pred_anno_da[choosen]*255).astype(np.uint8)
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_'+fn+'.bmp'), pred_anno_im)
-                    heat_map = density_heatmap(pred_seq_pro_da[choosen, :, :, 1])
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_heatseq_'+fn+'.bmp'), heat_map)
-                    im = images_da[choosen,:,:,0]
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_im_'+fn+'.bmp'), im)
-                    #generate sequence 
-                    im = images_da[choosen,:,:,3]
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_im_seq0'+fn+'.bmp'), im)
-                    im = images_da[choosen,:,:,4]
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_im_seq1'+fn+'.bmp'), im)
-                    im = images_da[choosen,:,:,5]
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_im_seq2'+fn+'.bmp'), im)
-                    im = images_da[choosen,:,:,6]
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_im_seq3'+fn+'.bmp'), im)
-
-
-                    anno_im = (annos_da[choosen]*255).astype(np.uint8)
-                    cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_anno_'+fn+'.bmp'), anno_im)
-
-                #2. calculate accurary
-                self.calculate_acc(cur_ims.copy(), filenames, pred_anno, annos_, ellip_infos_)
-                sum_acc += self.accu
-                sum_acc_iou += self.accu_iou
-                sum_acc_ellip += self.ellip_acc
-                mean_acc = sum_acc/count
-                mean_acc_iou = sum_acc_iou/count
-                mean_acc_ellip = sum_acc_ellip/count
-                #3. calculate loss
-                total_loss += loss
-
-                #4. time consume
-                time_consumed = time.time() - t0
-                time_per_batch = time_consumed/count
-
-                #5. check if change learning rate
-                if count % 100 == 0:
-                    self.try_update_lr()
-                #6. summary
-                writer.add_summary(summary_str, global_step=step)
-
-                #6. print
-                #print('\r' + 2 * ' ', end='')
-                print('epoch %5d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t mean_loss=%.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f\t time = %.2f' % (epoch, self.learning_rate, step, count, loss, (total_loss/count), mean_acc, mean_acc_iou, mean_acc_ellip, time_per_batch))
-            
-            #End one epoch
-            #count -= 1
-            print('epoch %5d\t learning_rate = %g\t mean_loss = %.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
-            print('Take time %3.1f' % (time.time() - t0))
-
-        except tf.errors.OutOfRangeError:
-            print('Error!')
-            count -= 1
-            print('epoch %5d\t learning_rate = %g\t mean_loss = %.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
-            print('Take time %3.1f' % (time.time() - t0))
-     
-        return step
-    
+        
     def train_one_epoch(self, sess, writer, epoch, step):
         print('sub_train_one_epoch')
         sum_acc = 0
@@ -363,12 +276,12 @@ class SeqFCNNet(FCNNet):
                 #1. train
                 images_, cur_ims_, ellip_infos_, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames])
                 
-                pred_anno_, pred_seq_pro_, summary_str, loss, _ = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op],
-                #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
+                #pred_anno_, pred_seq_pro_, summary_str, loss, _ = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op],
+                pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
                 #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss],
                                                                 feed_dict={self.images: images_, 
                                                                          self.annotations: annos_, self.lr: self.learning_rate})
-                       
+                '''       
                 if count % 10 == 0:
                     choosen = random.randint(0, self.batch_size-1)
                     fn = filenames[choosen].strip().decode('utf-8')
@@ -391,7 +304,7 @@ class SeqFCNNet(FCNNet):
 
                     anno_im = (annos_[choosen]*255).astype(np.uint8)
                     cv2.imwrite(os.path.join('image', 'res_seq_cur', str(step)+'_anno_'+fn+'.bmp'), anno_im)
-                
+                '''
 
                 #2. calculate accurary
                 self.calculate_acc(cur_ims_.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_)
@@ -518,6 +431,25 @@ def vis_main():
         model.build_vis()
         model.vis()
 
+def haus_main():
+ 
+    with tf.device('/gpu:0'):
+        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print('The number of train records is %d and valid records is %d.' % (len(train_records), len(valid_records)))
+        model = SeqFCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob, cfgs.logs_dir)
+        model.build_h_loss()
+        model.train()
+
+def vis_main():
+    with tf.device('/gpu:0'):
+        train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        print('The number of valid records is %d.' %  len(valid_records))
+        model = SeqFCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob, cfgs.logs_dir)
+        model.build_vis()
+        model.vis()
+
+
+
 def video_main():
     with tf.device('/gpu:0'):
         train_records, valid_records = scene_parsing.my_read_video_dataset(cfgs.seq_list_path, cfgs.anno_path)
@@ -545,4 +477,6 @@ if __name__ == '__main__':
         video_main()
     elif cfgs.mode == 'generate_re':
         generate_main()
+    elif cfgs.mode == 'haus_loss':
+        haus_main()
 
