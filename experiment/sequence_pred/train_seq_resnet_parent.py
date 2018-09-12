@@ -33,7 +33,7 @@ class Res101FCNNet(object):
 
     def __init__(self, mode, max_epochs, batch_size, n_classes, train_records, valid_records, im_sz, init_lr, keep_prob, logs_dir):
         self.max_epochs = max_epochs
-        self.keep_prob = keep_prob
+        #self.keep_prob = keep_prob
         self.batch_size = batch_size
         self.NUM_OF_CLASSESS = n_classes
         self.IMAGE_SIZE = im_sz
@@ -49,8 +49,10 @@ class Res101FCNNet(object):
         self.valid_records = valid_records
         self.per_e_train_batch = len(self.train_records)/self.batch_size
         self.per_e_valid_batch = len(self.valid_records)/self.batch_size
-
-        self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, cfgs.seq_num+3], name='input_image')
+        
+        self.keep_prob = tf.placeholder(tf.float32, shape=[], name='keep_prob')
+        self.input_keep_prob = tf.placeholder(tf.float32, shape=[], name='input_keep_prob')
+        self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, cfgs.seq_num+cfgs.cur_channel], name='input_image')
         self.annotations = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE, self.IMAGE_SIZE, 1], name='annotations')
 
         if self.mode == 'visualize' or 'vis_video':
@@ -101,6 +103,8 @@ class Res101FCNNet(object):
         #mean_pixel = np.mean(mean, axis=(0, 1))
 
         processed_images = utils.process_image(images, cfgs.mean_pixel)
+
+        processed_images = tf.nn.dropout(processed_images, self.input_keep_prob)
 
         with tf.variable_scope(inference_name):
             

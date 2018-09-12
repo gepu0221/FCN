@@ -5,6 +5,7 @@ import pdb
 import os
 from generate_heatmap import density_heatmap
 from six.moves import cPickle as pickle
+from Hausdorff_dis import cal_haus_loss
 
 
 try:
@@ -112,7 +113,7 @@ def caculate_ellip_accu_once(im, filename, pred, pred_pro, gt_ellip, if_valid=Fa
     
     sz_ = im.shape
     loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (sz_[0]*sz_[1])
-    print(loss)
+    
     #save worse result
     if if_valid:
         error_path = cfgs.error_path+'_valid'
@@ -189,7 +190,19 @@ class Ellip_acc(object):
 
         with open(self.pickle_path, 'rb') as f:
             self.shelter_map = pickle.load(f)
+    
+    def ellip_loss(self, pred_ellip, gt_ellip):
 
+        #loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (sz_[0]*sz_[1])
+        loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (gt_ellip[2]*gt_ellip[3]) * 1000
+ 
+        return loss
+
+    def haus_loss(self, pred_ellip, gt_ellip):
+        
+        loss = cal_haus_loss(pred_ellip, gt_ellip)
+
+        return loss
 
     #generate ellipse to compare ellispes info
     def caculate_ellip_accu_once(self, im, filename, pred, pred_pro, gt_ellip, if_valid=False):
@@ -206,13 +219,14 @@ class Ellip_acc(object):
             ellipse_info = cv2.fitEllipse(pts_)
             pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][0], ellipse_info[1][1]])
             ellipse_info = (tuple(np.array([ellipse_info[0][0], ellipse_info[0][1]])), tuple(np.array([ellipse_info[1][0], ellipse_info[1][1]])), 0)
+            loss = self.haus_loss(pred_ellip, gt_ellip)
         else:
             pred_ellip = np.array([0,0,0,0])
             ellipse_info = (tuple(np.array([0,0])), tuple(np.array([0,0])), 0)
+            loss = self.ellip_loss(pred_ellip, gt_ellip)
         
-        sz_ = im.shape
-        loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (sz_[0]*sz_[1])
-        print(loss)
+        #sz_ = im.shape
+        #loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (sz_[0]*sz_[1])
         #save worse result
         if if_valid:
             error_path = cfgs.error_path+'_valid'
@@ -249,12 +263,13 @@ class Ellip_acc(object):
             ellipse_info = cv2.fitEllipse(pts_)
             pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][0], ellipse_info[1][1]])
             ellipse_info = (tuple(np.array([ellipse_info[0][0], ellipse_info[0][1]])), tuple(np.array([ellipse_info[1][0], ellipse_info[1][1]])), 0)
+            loss = self.haus_loss(pred_ellip, gt_ellip)
         else:
             pred_ellip = np.array([0,0,0,0])
             ellipse_info = (tuple(np.array([0,0])), tuple(np.array([0,0])), 0)
+            loss = self.ellip_loss(pred_ellip, gt_ellip)
         
-        loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (gt_ellip[2]*gt_ellip[3]) * 1000
-  
+        #loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (gt_ellip[2]*gt_ellip[3]) * 1000
         #save worse result
         error_path = cfgs.error_path
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
@@ -286,4 +301,15 @@ class Ellip_acc(object):
 
         return loss
 
+def main():
+    pred_ellip1 = np.array([20, 30, 20, 40])
+    pred_ellip2 = np.array([19, 30, 20, 40])
+    gt_ellip = np.array([21, 30, 20, 40])
+    e_acc = Ellip_acc()
+    dis1 = e_acc.haus_loss(pred_ellip1, gt_ellip)
+    dis2 = e_acc.haus_loss(pred_ellip2, gt_ellip)
+    print(dis1)
+    print(dis2)
 
+if __name__ == '__main__':
+    main()

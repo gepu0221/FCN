@@ -277,8 +277,8 @@ class SeqFCNNet(FCNNet):
                 images_, cur_ims_, ellip_infos_, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames])
                 
                 #pred_anno_, pred_seq_pro_, summary_str, loss, _ = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op],
-                pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
-                #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss],
+                #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
+                pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss],
                                                                 feed_dict={self.images: images_, 
                                                                          self.annotations: annos_, self.lr: self.learning_rate})
                 '''       

@@ -31,21 +31,30 @@ def cal_haus_dis_p(set1, set2):
         set1: im shape of set1 [set1_num, 2]
         set2: gt shape of set2 [set2_num, 2]
     '''
+    set1 = np.array(set1)
+    set2 = np.array(set2)
+
     num_1 = set1.shape[0]
     num_2 = set2.shape[0]
 
     set1 = np.expand_dims(set1, axis=0)
-    set2 = np.expadn_dims(set2, axis=1)
+    set2 = np.expand_dims(set2, axis=1)
 
-    normalized_x = np.tile(set1, [num2, 1, 1])
-    normalized_y = np.tile(set2, [1, num1, 1])
+    normalized_x = np.tile(set1, [num_2, 1, 1])
+    normalized_y = np.tile(set2, [1, num_1, 1])
 
+    #print('n_x', normalized_x)
+    #print('n_y', normalized_y)
     differences = np.subtract(normalized_x, normalized_y)
     d_matrix = np.sum(np.power(differences, 2), 2)
+    #print('diff', differences)
+    #print('d_m', d_matrix)
 
     term_1 = np.sum(d_matrix.min(1)) / num_2
     term_2 = np.sum(d_matrix.min(0)) / num_1
 
+    #print(term_1)
+    #print(term_2)
     dis = term_1 + term_2
 
     return dis
@@ -64,3 +73,15 @@ def cal_haus_loss(pred_ellip, gt_ellip):
 
     return haus_dis
     
+def main():
+
+    a = np.random.rand(1,2) * 10
+    b = np.random.rand(2,2) * 10
+    print(a)
+    print(b)
+    dis = cal_haus_dis_p(a, b)
+
+    print(dis)
+
+if __name__ == '__main__':
+    main()
