@@ -9,13 +9,12 @@ from part_fintune import *
 def get_point_set(im, flag=0):
     
     sz = im.shape
-    cv2.imwrite('patch.bmp', im)
+    #cv2.imwrite('patch.bmp', im)
     pset = []
     for i in range(sz[0]):
         for j in range(sz[1]):
             if im[i][j] == flag:
                 pset.append([i, j])
-    #pdb.set_trace()
     return pset
 
 def get_dis(p1, p2):
@@ -26,28 +25,70 @@ def get_dis(p1, p2):
     if dis < 8:
         dis = 1
     else:
-        dis = np.log(dis)
-    
-    #print('dis: ', dis)
+        dis = np.log(dis)    
 
     return dis
+
+def get_dis_map(sz):
+    
+    global dis_map
+    dis_map = []
+
+    num = sz[0] * sz[1]
+    for i in range(num):
+        one_map = []
+        main_p = [i / sz[1], i % sz[1]]
+        for j in range(num):
+            p = [j / sz[1], j % sz[1]]
+            dis = get_dis(main_p, p)
+            one_map.append(dis)
+        dis_map.append(one_map)
+    
+    return dis_map
+
+def get_dis_map4(sz):
+
+    global dis_map
+    dis_map = []
+
+    for i in range(sz[0]):
+        row_map = []
+        for j in range(sz[1]):
+            one_map = []
+            for ii in range(sz[0]):
+                one_row_map = []
+                for jj in range(sz[1]):
+                    dis = get_dis([i, j], [ii, jj])
+                    one_row_map.append(dis)
+                one_map.append(one_row_map)
+            row_map.append(one_map)
+        dis_map.append(row_map)
+
+    return dis_map
+                    
+# From distance map to find dis
+def find_pair_dis(p1, p2, sz):
+  
+    dis = dis_map[p1[0]][p1[1]][p2[0]][p2[1]]
+
+    return dis 
+
 
 def find_max_grad_(grad_map, index):
     
     max_grad = 0
     max_index = index
-
     sz = grad_map.shape
+  
     for i in range(sz[0]):
         for j in range(sz[1]):
-            grad_dis = grad_map[i][j]/get_dis(index, [i,j])
-            #print('%d, %d : %g' % (i, j, grad_dis))
+            dis = get_dis(index, [i,j])
+            dis_ = find_pair_dis(index, [i,j], sz)
+            grad_dis = grad_map[i][j]/dis
             if max_grad < grad_dis:
                 max_grad = grad_dis
                 max_index = [i,j]
-    #print('origin_index: ', index)
-    #print('max_index: ', max_index)
-    #pdb.set_trace()
+ 
     return max_index
 
 def find_grad_(grad_crop, label_crop):
@@ -55,17 +96,11 @@ def find_grad_(grad_crop, label_crop):
     sz = grad_crop.shape
     label_pset = get_point_set(label_crop)
     re_crop = np.zeros((sz[0], sz[1]))
-    #pdb.set_trace()
     for i in range(len(label_pset)):
         l_p = label_pset[i]
-
-        max_grad_index = find_max_grad_(grad_crop, l_p)
-        lx = max_grad_index[0]
-        rx = max_grad_index[0]+1
-        ly = max_grad_index[1]
-        ry = max_grad_index[1]+1
-        re_crop[lx:rx, ly:ry] = 255
-        
+        max_grad_index = find_max_grad_(grad_crop, l_p) 
+        re_crop[max_grad_index[0]][max_grad_index[1]] = 255
+    
     return re_crop
 
 # Find max grad point with the same number of label_crop
@@ -152,6 +187,7 @@ def find_grad_im(im, im_gray, ellipse_info):
     im_ellip = np.ones((sz[0], sz[1], 3)) * 255
     cv2.ellipse(im_ellip, ellipse_info, (0,0,255),2)
 
+    t1 = time.time()
     for i in range(len(box_list)):
         box = box_list[i]
         
@@ -183,8 +219,39 @@ def find_grad_im(im, im_gray, ellipse_info):
             
             if im_cc[i][j] == 255:
                 im_c[i][j] = 255
-
+   
     return im_c, im_show
+
+# Find grad/dis max point.(test time)
+def find_grad_im_time(im, im_gray, ellipse_info):
+    
+
+    box_list = get_part_box(ellipse_info)
+    sz = im_gray.shape
+    im_cc = np.zeros((sz[0], sz[1]))
+
+    im_ellip = np.ones((sz[0], sz[1], 3)) * 255
+    cv2.ellipse(im_ellip, ellipse_info, (0,0,255),2)
+
+    for i in range(len(box_list)):
+        box = box_list[i]
+        
+        if box[0]<0 or box[1]<0 or box[2]>= sz[1] or box[3]>=sz[0]:
+            continue
+        ellipse_crop = im_ellip[box[1]:box[3], box[0]:box[2], 0]
+        #t1 = time.time()
+        im_crop = grad_(im_gray[box[1]:box[3], box[0]:box[2]])
+        #t2 = time.time()
+        crop = find_grad_(im_crop, ellipse_crop)        
+        #t3 = time.time()
+        im_cc[box[1]:box[3], box[0]:box[2]] += crop
+        #t4 = time.time()
+        #tt1 = float(t2 - t1)
+        #tt2 = float(t3 - t2)
+        #tt3 = float(t4 - t3)
+        #print('%d: time_grad: %f, time_find:%f, time_process:%f' % (i, tt1, tt2, tt3))
+    return im_cc
+
 
 
 # Use different scale to find the crop which gets most grad/dis points
