@@ -5,8 +5,10 @@ import os
 from ellipse_my import ellipse_my
 from watershed import watershed
 
-w_thr = 20
-h_thr = 20
+w_thr = 10
+h_thr = 10
+offset = 10
+box_off =[[0, 0], [0, offset], [0, -offset], [offset, 0], [-offset, 0]]
 
 def get_part_set(ellipse_info, part_num=128):
     '''
@@ -57,9 +59,26 @@ def get_single_box(cur_axis, next_axis):
 
     return box
 
+def get_diff_single_box(cur_axis, box_num=5):
+
+    cx = cur_axis[1]
+    cy = cur_axis[0]
+    w = w_thr
+    h = h_thr
+    box_set = []
+
+    for i in range(box_num):
+        cx_n = cx + box_off[i][0]
+        cy_n = cy + box_off[i][1]
+        box = [int(cx_n-w), int(cy_n-h), int(cx_n+w), int(cy_n+h)]
+        box_set.append(box)
 
 
-def get_part_box(ellipse_info, part_num=128):
+    return box_set
+
+
+
+def get_part_box(ellipse_info, part_num=64):
     
     box_list = []
 
@@ -74,16 +93,33 @@ def get_part_box(ellipse_info, part_num=128):
 
     return box_list
 
+def get_adaptive_box(ellipse_info, part_num=128):
+    
+    box_list = []
+
+    part_set = get_part_set(ellipse_info, part_num)
+
+    for i in range(len(part_set)):
+        
+        cur_index = i
+        box_set = get_diff_single_box(part_set[cur_index])
+        box_list.append(box_set)
+
+    return box_list
 
 def threshold_(im):
     _, thresh = cv2.threshold(im, 80, 255, cv2.THRESH_BINARY_INV)
 
     return thresh
+
+
 def otsu_threshold_(im):
     
     _,thresh = cv2.threshold(im, 0, 255, cv2.THRESH_BINARY+ cv2.THRESH_OTSU)
 
     return thresh
+
+
 def canny_(im):
     cv2.GaussianBlur(im, ksize=(5,5), sigmaX=2)
     im = cv2.Canny(im, threshold1=127, threshold2=255)
@@ -231,7 +267,7 @@ def main_test_adap():
 
 def main_test_grad():
     
-    filename = 'img00293'
+    filename = 'img00003'
     im = cv2.imread('%s.bmp' % filename)
     im_gray = cv2.imread('%s.bmp' % filename, 0)
 
@@ -239,10 +275,20 @@ def main_test_grad():
 
     cv2.imwrite('grad_%s.bmp' % filename, im)
 
+def main_test_grad_dire():
+    
+    filename = 'img00003'
+    im = cv2.imread('%s.bmp' % filename)
+    im_gray = cv2.imread('%s.bmp' % filename, 0)
+
+    im = grad_direction(im_gray)
+
+    cv2.imwrite('grad_dire%s.bmp' % filename, im)
 
 if __name__ == '__main__':
     #main()
     #main_watershed()
     #main_adap()
     main_test_grad()
+    #main_test_grad_dire()
 

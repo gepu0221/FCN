@@ -1,13 +1,11 @@
 import numpy as np
 import cv2
-import math
 import time
 import pdb
 import os
 from ellipse_my import ellipse_my
 from part_fintune import *
 
-#1. Get point
 def get_point_set(im, flag=0):
     
     sz = im.shape
@@ -19,7 +17,6 @@ def get_point_set(im, flag=0):
                 pset.append([i, j])
     return pset
 
-#2. Dis function
 def get_dis(p1, p2):
     
     dis = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
@@ -31,6 +28,23 @@ def get_dis(p1, p2):
         dis = np.log(dis)    
 
     return dis
+
+def get_dis_map(sz):
+    
+    global dis_map
+    dis_map = []
+
+    num = sz[0] * sz[1]
+    for i in range(num):
+        one_map = []
+        main_p = [i / sz[1], i % sz[1]]
+        for j in range(num):
+            p = [j / sz[1], j % sz[1]]
+            dis = get_dis(main_p, p)
+            one_map.append(dis)
+        dis_map.append(one_map)
+    
+    return dis_map
 
 def get_dis_map4(sz):
 
@@ -78,23 +92,57 @@ def find_max_grad_(grad_map, index):
  
     return max_index
 
-def find_grad_setnum(grad_crop, label_crop):
-
+def find_grad_(grad_crop, label_crop):
+    
     sz = grad_crop.shape
     label_pset = get_point_set(label_crop)
-    grad_pset = []
     re_crop = np.zeros((sz[0], sz[1]))
     for i in range(len(label_pset)):
         l_p = label_pset[i]
         max_grad_index = find_max_grad_(grad_crop, l_p) 
-        grad_pset.append(max_grad_index)
-        grad_crop[max_grad_index[0]][max_grad_index[1]] = 0
+        
+        print('max_index: ', max_grad_index)
+        re_crop[max_grad_index[0]][max_grad_index[1]] = 255
+        
+
+    return re_crop
+
+def find_grad_setnum(grad_crop, label_crop):
+
+    sz = grad_crop.shape
+    label_pset = get_point_set(label_crop)
+    re_crop = np.zeros((sz[0], sz[1]))
+    for i in range(len(label_pset)):
+        l_p = label_pset[i]
+        max_grad_index = find_max_grad_(grad_crop, l_p) 
+        #grad_crop[max_grad_index[0]][max_grad_index[1]] = 0
         re_crop[max_grad_index[0]][max_grad_index[1]] = 255
 
+    return re_crop
 
-    return re_crop, label_pset, grad_pset
 
-#3. Morphological processing
+# Find max grad point with the same number of label_crop
+def find_grad_num(grad_crop, label_crop):
+    
+    sz = grad_crop.shape
+    label_pset = get_point_set(label_crop)
+    re_crop = np.zeros((sz[0], sz[1]))
+    grad_crop_c = grad_crop.copy()
+
+    for i in range(int(len(label_pset)/2)):
+        index_ = np.argmax(grad_crop_c)
+        max_grad_index = [int(index_/sz[0]), index_%sz[1]]
+        grad_crop_c[max_grad_index[0]][max_grad_index[1]] = 0
+     
+        lx = max_grad_index[0]
+        rx = max_grad_index[0]+1
+        ly = max_grad_index[1]
+        ry = max_grad_index[1]+1
+        re_crop[lx:rx, ly:ry] = 255
+        
+    return re_crop
+
+
 def closed_(im, num):
 
     kernel = np.ones((3,3), np.uint8)
@@ -126,32 +174,8 @@ def polyfit_(im):
                 x.append(i)
                 y.append(j)
 
-    curve = np.polyfit(np.array(x), np.array(y), 2)
+    curve = np.polyfit(np.array(x), np.array(y), 5)
 
-    return curve[0]
-
-def polyfit_error(im):
-
-    sz = im.shape
-    x = []
-    y = []
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            if im[i][j] == 255:
-                x.append(i)
-                y.append(j)
-
-    curve = np.polyfit(np.array(x), np.array(y), 10)
-    
-    error_sum = 0
-    for i in range(len(x)):
-        x_ = x[i]
-        error_ = np.polyval(curve, x_)
-        error_sum += error_
-
-    return error_sum
-
-#4. Show
 def result_show(im_show, im_cc, crop, box, im_crop):
     
     ii = 0
@@ -168,89 +192,18 @@ def result_show(im_show, im_cc, crop, box, im_crop):
     for i in range(len(im_crop)):
         im_show[box[1]:box[3], box[0]:box[2]] = im_crop[i]
 
-#5. grad_direction
-def comp_grad_dire(crop1, crop2, pset1, pset2):
-
-    grad_dire1 = grad_direction(crop1)
-    grad_dire2 = grad_direction(crop2)
-    
-    sum1 = np.zeros((2))
-    sum2 = np.zeros((2))
-
-    for i in range(len(pset1)):
-        p1 = pset1[i]
-        sum1 += np.array(p1)
-        p2 = pset2[i]
-        sum2 += np.array(p2)
-
-    m1 = sum1/len(pset1)
-    m2 = sum2/len(pset1)
-    dis_sum = 0
-    for i in range(len(pset2)):
-        p = pset2[i]
-        dis = (np.array(p)-m1)**2
-
-        dis_sum += dis
-
-    print(dis)
-    pdb.set_trace()
-
-def compute_dispersion(pset):
-    
-    sum_ = np.zeros((2))
-
-    for i in range(len(pset)):
-        p = pset[i]
-        sum_ += np.array(p)
-    #mean
-    m = sum_/len(pset)
-
-    dis_sum = 0
-    for i in range(len(pset)):
-        p = pset[i]
-        dis = (np.array(p)-m)**2
-
-        dis_sum += dis
-
-    dis = np.sum(dis_sum)
-    
-    return dis
-
-
-def comp_pset(crop1, crop2):
-    
-    k1 = polyfit_(crop1)
-    k2 = polyfit_(crop2)
-    tan = (k2-k1) / (1+k1*k2)
-    angle = math.atan(tan)
-    cos = math.cos(angle)
-    #dis = np.sum((curve1 - curve2)**2)
-    print(cos)
-    pdb.set_trace()
-
-def comp_pset_error(crop):
-    
-    error = polyfit_error(crop)
-    print(error)
-    pdb.set_trace()
 
 # Find grad/dis max point.
 def find_grad_im(im, im_gray, ellipse_info):
     
-    sz = im_gray.shape
     box_list = get_part_box(ellipse_info)
     im_c = im.copy()
-    #tmp
-    im_c_grad1 = im_gray.copy()
-    im_c_grad2 = im_gray.copy()
-    im_c_ellip = np.zeros((sz[0], sz[1], 3))
-
+    sz = im_gray.shape
     im_cc = np.zeros((sz[0], sz[1]))
     im_show = im_gray.copy()
 
     im_ellip = np.ones((sz[0], sz[1], 3)) * 255
     cv2.ellipse(im_ellip, ellipse_info, (0,0,255),1)
-    cv2.ellipse(im_c_ellip, ellipse_info, (255, 0, 0), 1)
 
     for i in range(len(box_list)):
     #for i in range(1):
@@ -263,19 +216,9 @@ def find_grad_im(im, im_gray, ellipse_info):
             continue
         ellipse_crop = im_ellip[box[1]:box[3], box[0]:box[2], 0]
         im_crop = grad_(im_gray[box[1]:box[3], box[0]:box[2]])
-
-        crop, ellipse_pset, im_pset = find_grad_setnum(im_crop, ellipse_crop)
-
-        #cv2.rectangle(im_c, (box[0], box[1]), (box[2], box[3]),  (0,255,0), 1)
-        #cv2.imwrite('grad_dire.bmp', im_c )
-        '''
-        im_c_grad1[box[1]:box[3], box[0]:box[2]] = grad_dire1
-        im_c_grad2[box[1]:box[3], box[0]:box[2]] = grad_dire2
-
-        cv2.imwrite('grad_dire_patch1.bmp', im_c_grad1)
-        cv2.imwrite('grad_dire_patch2.bmp', im_c_grad2)
-        '''
-
+        #crop = find_grad_(im_crop, ellipse_crop)
+        crop = find_grad_setnum(im_crop, ellipse_crop)
+        
         
         ii = 0
         jj = 0
@@ -293,8 +236,7 @@ def find_grad_im(im, im_gray, ellipse_info):
             jj = 0
         im_show[box[1]:box[3], box[0]:box[2]] = im_crop
 
-    im_cc = closed_(im_cc, 3)
-    im_cc = opened_(im_cc, 1)
+    #im_cc = closed_(im_cc, 2)
     
     for i in range(sz[0]):
         for j in range(sz[1]):
@@ -334,6 +276,67 @@ def find_grad_im_time(im, im_gray, ellipse_info):
         #print('%d: time_grad: %f, time_find:%f, time_process:%f' % (i, tt1, tt2, tt3))
     return im_cc
 
+
+
+# Use different scale to find the crop which gets most grad/dis points
+def get_most_crop(crop_set):
+    
+    max_sum = -1
+    max_index = 0
+    for i in range(len(crop_set)):
+        crop = crop_set[i]
+        sum_ = np.sum(crop)
+        if sum_ > max_sum:
+            max_index = i
+            max_sum = sum_
+        cv2.imwrite('crop_patch/%d.bmp' % i, crop)
+    pdb.set_trace()
+    return crop_set[max_index], max_index
+
+def find_grad_adap_im(im, im_gray, ellipse_info):
+    
+    box_list = get_adaptive_box(ellipse_info, part_num=128)
+    sz = im_gray.shape
+
+    im_c = im.copy() # Image used to show rgb with contours.
+    im_cc = np.zeros((sz[0], sz[1])) # Image used to see only contours.
+    im_show = im_gray.copy() # Image to show grad map.
+
+    im_ellip = np.ones((sz[0], sz[1], 3)) * 255
+    cv2.ellipse(im_ellip, ellipse_info, (0,0,255), 2)
+
+    time_all = time.time()
+    for i in range(len(box_list)):
+        box_set = box_list[i]
+        crop_set = []
+        im_crop_set = []
+        time_one_box_list = time.time()
+        for j in range(len(box_set)):
+            box = box_set[j]
+            
+            if box[0]<0 or box[1]<0 or box[2]>=sz[1] or box[3]>=sz[0]:
+                continue
+
+            ellipse_crop = im_ellip[box[1]:box[3], box[0]:box[2], 0]
+            im_crop = grad_(im_gray[box[1]:box[3], box[0]:box[2]])
+            crop = find_grad_(im_crop, ellipse_crop)
+
+            crop_set.append(crop)
+            im_crop_set.append(im_crop)
+
+        crop, max_index = get_most_crop(crop_set)
+        print('box_list%d: choosen index: %d' % (i, max_index))
+        result_show(im_show, im_cc, crop, box_set[max_index], im_crop_set)
+        print('time of a box list %g' % (time.time()-time_one_box_list)) 
+
+    print('time of a image: %g' % (time.time()-time_all))
+    for i in range(sz[0]):
+        for j in range(sz[1]):
+            
+            if im_cc[i][j] == 255:
+                im_c[i][j] = 255
+
+    return im_c, im_show
 
 
 

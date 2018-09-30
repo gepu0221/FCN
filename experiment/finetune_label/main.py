@@ -6,8 +6,8 @@ import os
 import time
 from part_fintune import adpThreshold_im, otsu_threshold_
 from find_nearest import find_nearest_im
-from find_max_grad import find_grad_im, find_grad_adap_im, find_grad_im_time, get_dis_map, get_dis_map4
-
+#from find_max_grad import find_grad_im, find_grad_adap_im, find_grad_im_time, get_dis_map, get_dis_map4
+from find_max_grad import find_grad_im, get_dis_map4
 def read_line(line):
     line_s = line.split(' ')
     print(line_s)
@@ -17,7 +17,9 @@ def read_line(line):
     cx=(lx+rx)/2
     cy=(ly+ry)/2
 
-    ellipse_info = ((cx, cy), (w, h), 0)
+    #ellipse_info = ((cx, cy), (w, h), 0)
+    ellipse_info = ((cx/2, cy/2), (w/2, h/2), 0)
+
    
     return ellipse_info
 
@@ -91,7 +93,7 @@ def main_max_grad():
     root_file = 's8'
     root_dir = '%s/Image' % root_file
     txt_root_dir = root_file
-    re_root_dir = '%s_re_grad_test_time0929' % root_file
+    re_root_dir = '%s_re_grad_opened0930' % root_file
     glob_file = os.path.join(root_dir, '*.bmp')
     file_list = []
     file_list.extend(glob.glob(glob_file))
@@ -102,26 +104,32 @@ def main_max_grad():
         os.makedirs(re_root_dir)
 
     count = -1
-    sz = [40, 40]
-    dis_map = get_dis_map(sz)
+    #sz = [40, 40]
+    sz = [20, 20]
+    dis_map = get_dis_map4(sz)
 
     for line in f_txt:
 
         count += 1
-        if count < 38:
+        if count < 3:
             continue
         f = line.split(' ')[0]
         filename = os.path.splitext(f.split("/")[-1])[0]
         f = os.path.join(root_dir, '%s.bmp' % filename)
         im = cv2.imread(f)
         im_gray = cv2.imread(f, 0)
+        #Resize
+        im_sz = im.shape
+        im = cv2.resize(im, (int(im_sz[1]/2), int(im_sz[0]/2)), interpolation=cv2.INTER_CUBIC)
+        im_gray = cv2.resize(im_gray,(int(im_sz[1]/2), int(im_sz[0]/2)), interpolation=cv2.INTER_CUBIC) 
+        
         ellipse_info = read_line(line)
         after_grad, im_show = find_grad_im(im, im_gray, ellipse_info)
         #after_grad, im_show = find_grad_adap_im(im, im_gray, ellipse_info)
 
-        re_filename = os.path.join(re_root_dir, 'grad_%s_adap20_sqrt.bmp' % filename)
+        re_filename = os.path.join(re_root_dir, 'grad_%s_closed10_sqrt_comp.bmp' % filename)
         cv2.imwrite(re_filename, after_grad)
-        show_filename = os.path.join(re_root_dir, 'grad_%s_show20.bmp' % filename)
+        show_filename = os.path.join(re_root_dir, 'grad_%s_closed10_comp.bmp' % filename)
         #cv2.imwrite(show_filename, im_show)
 
         #draw ellipse 
@@ -146,7 +154,8 @@ def main_test_time():
        os.makedirs(re_root_dir)
 
    count = -1
-   sz = [40, 40]
+   #sz = [40, 40]
+   sz = [20, 20]
    dis_map = get_dis_map4(sz)
 
    for line in f_txt:
@@ -159,9 +168,16 @@ def main_test_time():
        f = os.path.join(root_dir, '%s.bmp' % filename)
        im = cv2.imread(f)
        im_gray = cv2.imread(f, 0)
+
+       #Resize
+       im_sz = im.shape
+       im = np.resize(im, (int(im_sz[0]/2), int(im_sz[1]/2), 3))
+       im_gray = np.resize(im_gray,(int(im_sz[0]/2), int(im_sz[1]/2)))
+
        ellipse_info = read_line(line)
        t1 = time.time()
-       im_cc = find_grad_im_time(im, im_gray, ellipse_info)
+       im_cc = find_grad_im(im, im_gray, ellipse_info)
+       #im_cc = find_grad_im_time(im, im_gray, ellipse_info)
        print('time %g of a image' % (time.time()-t1))
 
        re_filename = os.path.join(re_root_dir, 'im_grad_%s.bmp' % filename)
@@ -181,5 +197,5 @@ if __name__ == '__main__':
     
     #main_adap()
     #main_nearest()
-    #main_max_grad()
-    main_test_time()
+    main_max_grad()
+    #main_test_time()
