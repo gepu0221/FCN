@@ -6,6 +6,7 @@ import pdb
 import os
 from ellipse_my import ellipse_my
 from part_fintune import *
+from connect_pset import *
 
 #1. Get point
 def get_point_set(im, flag=0):
@@ -252,6 +253,7 @@ def find_grad_im(im, im_gray, ellipse_info):
     cv2.ellipse(im_ellip, ellipse_info, (0,0,255),1)
     cv2.ellipse(im_c_ellip, ellipse_info, (255, 0, 0), 1)
 
+    total_pset = []
     for i in range(len(box_list)):
     #for i in range(1):
         
@@ -268,13 +270,6 @@ def find_grad_im(im, im_gray, ellipse_info):
 
         #cv2.rectangle(im_c, (box[0], box[1]), (box[2], box[3]),  (0,255,0), 1)
         #cv2.imwrite('grad_dire.bmp', im_c )
-        '''
-        im_c_grad1[box[1]:box[3], box[0]:box[2]] = grad_dire1
-        im_c_grad2[box[1]:box[3], box[0]:box[2]] = grad_dire2
-
-        cv2.imwrite('grad_dire_patch1.bmp', im_c_grad1)
-        cv2.imwrite('grad_dire_patch2.bmp', im_c_grad2)
-        '''
 
         
         ii = 0
@@ -288,20 +283,24 @@ def find_grad_im(im, im_gray, ellipse_info):
                 
                 if crop[ii][jj] == flag:
                     im_cc[i][j] = 255
+                    #total_pset.append([i, j])
                 jj += 1
             ii += 1
             jj = 0
         im_show[box[1]:box[3], box[0]:box[2]] = im_crop
 
-    im_cc = closed_(im_cc, 3)
-    im_cc = opened_(im_cc, 1)
-    
     for i in range(sz[0]):
         for j in range(sz[1]):
             
             if im_cc[i][j] == 255:
                 im_c[i][j] = 255
-   
+                total_pset.append([i, j])
+
+    pdb.set_trace()
+    c_list, v_list = connect_speed(total_pset)
+    pdb.set_trace()
+
+
     return im_c, im_show
 
 # Find grad/dis max point.(test time)
