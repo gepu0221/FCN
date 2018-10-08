@@ -89,6 +89,20 @@ def opened_(im, num):
 
     return im
 
+def dilate_(im, num):
+    kernel = np.ones((3,3), np.uint8)
+    for i in range(num):
+        im = cv2.dilate(im, kernel)
+
+    return im
+
+def erode_(im, num):
+    kernel = np.ones((3,3), np.uint8)
+    for i in range(num):
+        im = cv2.erode(im, kernel)
+
+    return im
+
 def polyfit_(im):
     
     sz = im.shape

@@ -5,8 +5,8 @@ import os
 from ellipse_my import ellipse_my
 from watershed import watershed
 
-w_thr = 10
-h_thr = 10
+w_thr = 4
+h_thr = 4
 offset = 10
 box_off =[[0, 0], [0, offset], [0, -offset], [offset, 0], [-offset, 0]]
 
@@ -93,6 +93,29 @@ def get_part_box(ellipse_info, part_num=64):
 
     return box_list
 
+def get_point_box(im, im_show):
+    '''
+    use every point which draw by cv2.ellipse as center to get box list.
+    '''
+
+    sz = im.shape
+    pset = []
+    box_list = []
+    for i in range(sz[0]):
+        for j in range(sz[1]):
+            if im[i][j][0] == 0:
+                pset.append([h_thr, w_thr])
+                box = get_single_box([i, j], None)
+                box_list.append(box)
+
+                #cv2.rectangle(im_show, (box[0], box[1]), (box[2], box[3]),  (0,255,0), 1)
+                #cv2.imwrite('0grad_dire.bmp', im_show)
+                #pdb.set_trace()
+
+    return box_list, pset
+
+
+
 def get_adaptive_box(ellipse_info, part_num=128):
     
     box_list = []
@@ -134,11 +157,11 @@ def adaptiveThreshold_(im):
     return im
 
 def grad_(im):
-    
+
     solelx = cv2.Sobel(im, cv2.CV_64F, 1, 0, ksize=3)
     solely = cv2.Sobel(im, cv2.CV_64F, 0, 1, ksize=3)
     grad = cv2.magnitude(solelx, solely)
-
+    
     return grad
 
 def grad_direction(im):
