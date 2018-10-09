@@ -51,6 +51,7 @@ def adap_hist_process(im, hist_sz, hist_range):
     #cv2.imwrite('dis_adap.bmp', im_at)
 
     return hist, im_at/hist_sz
+
 # use simple threshold to process dis_map
 def hist_process(im, hist_sz, hist_range, thresh):
     
@@ -90,7 +91,7 @@ def find_max_grad_continue(grad_map, index, pre_idx, center):
                 dis2 = 0
             else:
                 dis2 = find_pair_dis(pre_idx, [i,j], sz)
-            dis = dis1 + dis2
+            dis = dis1 + dis2 * 4
             grad_dis = grad_map[i][j]/dis
             dis_map[i][j] = int(grad_dis)
             if max_grad < grad_dis:
@@ -153,6 +154,7 @@ def find_grad_continue_setnum(grad_crop, label_crop, pre_idx, center):
 def get_local_pre_idx(pre_idx_o, box):
     
     pre_idx = pre_idx_o.copy()
+   
     if pre_idx[0] >= box[3]:
         pre_idx[0] = box[3] - 1
     if pre_idx[1] >= box[2]:
@@ -161,9 +163,9 @@ def get_local_pre_idx(pre_idx_o, box):
         pre_idx[0] = box[1]
     if pre_idx[1] < box[0]:
         pre_idx[1] = box[0]
-    
+   
     pre_idx[0] -= box[1]
-    pre_idx[1] -= box[2]
+    pre_idx[1] -= box[0]
 
     return pre_idx
 
@@ -245,12 +247,10 @@ def find_grad_im1(im, im_gray, ellipse_info):
     box_list, pset = get_point_box(im_ellip, im_c)
 
     for i in range(len(box_list)):
-        #cv2.rectangle(im_c, (box[0], box[1]), (box[2], box[3]),  (0,255,0), 1)
         box = box_list[i]
         c_idx = pset[i]
 
         if box[0]<0 or box[1]<0 or box[2]>= sz[1] or box[3]>=sz[0]:
-            #print('continue')
             continue
 
         #cv2.rectangle(im_c, (box[0], box[1]), (box[2], box[3]),  (0,255,0), 1)
@@ -332,29 +332,58 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
 
     for i in range(sz[0]):
         for j in range(sz[1]):
-            
-            #if im_cc[i][j] == 255:
-                #im_c[i][j] = 255
             if im_cc[i][j] > 0:
-                im_c[i][j] = im_cc[i][j]
+                #im_c[i][j] = im_cc[i][j]
+                #im_c[i][j] = 255
                 total_pset.append([i, j])
     
-    '''
-    c_list = connect(total_pset)
+    
+    #c_list = connect(total_pset)
+    c_list, p_s, p_e = connect_obey_dire(total_pset, [ellipse_info[0][1], ellipse_info[0][0]])
     im_conn = np.zeros((sz[0], sz[1], 3))
     im_conn = connect_line(c_list, im_conn)
-    #im_conn = dilate_(im_conn, 2)
+    im_show = im_conn.copy()
     im_contours = im_conn[:,:,0].astype(np.uint8)
     #Draw contours
     c_im_show = np.zeros((sz[0], sz[1], 3))
     _, contours, hierarchy = cv2.findContours(im_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    count = 0
+    for i in range(len(contours)):
+        c_ = contours[count]
+        if len(c_) < 50:
+            contours.remove(c_)
+            count -= 1
+        count += 1
+
     cv2.drawContours(c_im_show, contours, -1, (0, 255, 0), 1)
+    #cv2.imwrite('re_contours_before.bmp', c_im_show)
+    
     #cv2.imwrite('re_contours.bmp', c_im_show)
+    ced_list = []
     color = np.array((255, 255, 255))
     for i in range(sz[0]):
         for j in range(sz[1]):
             if c_im_show[i][j][1] == 255:
-                im_c[i-1:i+2, j-1:j+2, 0:3] = color
+                #im_c[i-1:i+2, j-1:j+2, 0:3] = color
+                #im_c[i][j][0:3] = color
+                ced_list.append([i, j])
+    c2_list, _, _ = connect_obey_dire(ced_list, [ellipse_info[0][1], ellipse_info[0][0]])
+    im_conn2 = np.zeros((sz[0], sz[1], 3))
+    im_conn2 = connect_line(c2_list, im_conn2, 200)
+    im_show = im_conn2.copy()
+
+    for i in range(sz[0]):
+        for j in range(sz[1]):
+            if im_show[i][j][1] == 255:
+                #im_c[i-1:i+2, j-1:j+2, 0:3] = color
+                im_c[i][j][0:3] = color
+    '''
+    i = p_s[0]
+    j = p_s[1]
+    im_c[i-1:i+2, j-1:j+2, 0:3] = np.array((0, 0, 255))
+    i = p_e[0]
+    j = p_e[1]
+    im_c[i-1:i+2, j-1:j+2, 0:3] = np.array((0, 255, 0))
     '''
     return im_c, im_show
 
