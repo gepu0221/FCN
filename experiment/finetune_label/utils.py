@@ -21,12 +21,12 @@ def get_point_set(im, flag=0):
     return pset
 
 #2. Dis function
-def get_dis(p1, p2):
+def get_dis(p1, p2, min_dis=8):
     
     dis = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
     dis = np.sqrt(dis)
     #dis = np.power(dis, 0.8)
-    if dis < 8:
+    if dis < min_dis:
         dis = 1
     else:
         dis = np.log(dis)    
@@ -36,6 +36,19 @@ def get_dis(p1, p2):
 def get_dis2_true(p1, p2):
 
     dis = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
+    if dis == 0:
+        dis =0.001
+
+    return dis
+
+def get_dis_true(p1, p2):
+
+    dis = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
+    dis = np.sqrt(dis)
+    
+    if dis == 0:
+        dis =0.001
+
 
     return dis
 
@@ -65,8 +78,17 @@ def find_pair_dis(p1, p2, sz):
     #print('p1_idx: ', p1)
     #print('p2_idx: ', p2)
     dis = dis_map[p1[0]][p1[1]][p2[0]][p2[1]]
-
+    
     return dis 
+
+def find_pair_dis_(p1, p2, sz):
+    print('p1_idx: ', p1)
+    print('p2_idx: ', p2)
+    dis = dis_map[p1[0]][p1[1]][p2[0]][p2[1]]
+    pdb.set_trace()
+    return dis 
+
+
 
 #3. Morphological processing
 def closed_(im, num):
@@ -134,5 +156,109 @@ def result_show(im_show, im_cc, crop, box, im_crop):
         jj = 0
     for i in range(len(im_crop)):
         im_show[box[1]:box[3], box[0]:box[2]] = im_crop[i]
+
+#5. transform
+def polar_transform(p, center):
+    #numpy axis
+    cx = center[0]
+    cy = center[1]
+    off0 = p[0] - cx
+    off1 = p[1] - cy
+    off_sum = np.sqrt(off0**2 + off1**2)
+    cos = off0/off_sum
+    sin = off1/off_sum
+    r = np.sqrt(np.power(off0, 2) + np.power(off1, 2))
+    
+    return cos, sin, r
+
+def ellip_to_circle(p, w, h, center):
+    '''
+    Transform ellipse axis to circle axis.
+    '''
+    if w<h:
+        normal_r = int(w/2)
+    else:
+        normal_r = int(h/2)
+
+    cos, sin = polar_transform(p, center)
+    #pdb.set_trace()
+    p_cir = [0, 0]
+    p[1] = int(center[0] + cos*normal_r)
+    p[0] = int(center[1] + sin*normal_r)
+
+    return p
+
+def ellip_to_circle_nearby(p, rate1, rate2, center):
+    '''
+    Transform points in ellipse or nearby axis to circle axis.
+    '''
+
+    cos, sin, r = polar_transform(p, center)
+    #pdb.set_trace()
+    p_cir = [0, 0]
+    p[1] = int(center[0] + cos*r*rate1)
+    p[0] = int(center[1] + sin*r*rate2)
+
+    return p
+
+
+def ellip_cir(ellip_pset, ellipse_info):
+    #opencv axis
+    center = [ellipse_info[0][0], ellipse_info[0][1]]
+    w = ellipse_info[1][0]
+    h = ellipse_info[1][1]
+
+    if w<h:
+        normal_r2 = w
+    else:
+        normal_r2 = h
+
+    rate1 = normal_r2 / w
+    rate2 = normal_r1 / h
+
+    cir_pset = []
+    for i in range(len(ellip_pset)):
+        #numpy
+        p_nu = ellip_pset[i]
+        #opencv
+        p_o = [p_nu[1], p_ou[0]]
+        p_new = ellip_to_circle(p_o, rate1, rate2, center)
+        cir_pset.append([p_nu, p_new])
+
+    return cir_pset
+
+
+
+def main_ec():
+    im = np.ones((400, 400, 3)) * 127
+    #numpy cx=20, cy =10, w=20, h =10)
+    center = (100, 200)
+    axis = (100, 200)
+    angle = 0
+    ellipse_info = (center, axis, angle)
+    cv2.ellipse(im, ellipse_info, (0,255,0), 1)
+    cv2.imwrite('test_ec/ellipse.bmp', im)
+
+    w = axis[0]
+    h = axis[1]
+    center_ = list(center)
+    sz = im.shape
+    p_cir_list = []
+    for i in range(sz[0]):
+        for j in range(sz[1]):
+            if im[i][j][1] == 255:
+                p_ = ellip_to_circle([j, i], axis[0], axis[1], center)
+                p_cir_list.append(p_)
+    #pdb.set_trace()
+    for i in range(len(p_cir_list)):
+        p = p_cir_list[i]
+        ii = p[1]
+        jj = p[0]
+        im[ii][jj][0:3] = np.array((255, 0, 0))     
+
+    cv2.imwrite('test_ec/ellipse_c.bmp', im)
+
+if __name__ == '__main__':
+    main_ec()
 
 

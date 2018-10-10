@@ -12,6 +12,10 @@ from utils import *
 
 max_dis = 12
 max_dire = 2
+red = np.array((0, 0, 255))
+green = np.array((0, 255, 0))
+black = np.array((0, 0, 0))
+white = np.array((255, 255, 255))
 
                    
 def find_max_grad_(grad_map, index):
@@ -68,13 +72,14 @@ def hist_process(im, hist_sz, hist_range, thresh):
     #cv2.imwrite('hist.bmp', hist_im)
 
     _, im_at = cv2.threshold(im, thresh, 255, cv2.THRESH_BINARY_INV)
-    #cv2.imwrite('dis_adap_inv.bmp', im_at)
-    #_, im_at = cv2.threshold(im, thresh, 255, cv2.THRESH_BINARY)
-    #cv2.imwrite('dis_adap.bmp', im_at)
-    #pdb.set_trace()
     
     return hist, im_at/255
 
+def thresh_inv(im, thresh):
+
+    _, im_at = cv2.threshold(im, thresh, 255, cv2.THRESH_BINARY_INV)
+
+    return im_at/255
 
 def find_max_grad_continue(grad_map, index, pre_idx, center):
     
@@ -91,14 +96,15 @@ def find_max_grad_continue(grad_map, index, pre_idx, center):
                 dis2 = 0
             else:
                 dis2 = find_pair_dis(pre_idx, [i,j], sz)
-            dis = dis1 + dis2 * 4
+            dis = dis1 + dis2 * 1
             grad_dis = grad_map[i][j]/dis
             dis_map[i][j] = int(grad_dis)
             if max_grad < grad_dis:
                 max_grad = grad_dis
                 max_index = [i,j]
-    hist, im_at = hist_process(dis_map.astype(np.uint8), 30, [0, 30], int(max_grad)-5)
     flag = 255
+    
+    im_at = thresh_inv(dis_map.astype(np.uint8), int(max_grad)-5)
     sum_ = np.sum(im_at)
     if sum_ > 5:
         im1 = dis_map * im_at
@@ -109,10 +115,9 @@ def find_max_grad_continue(grad_map, index, pre_idx, center):
         if dis1 < dis2:
             max_index = [max_idx1[1], max_idx1[0]]
             flag = 1
-        
-    return max_index, flag, im_at*255
-
-
+ 
+    #return max_index, flag, im_at*255
+    return max_index, flag, None
 
 
 def find_grad_setnum(grad_crop, label_crop):
@@ -198,27 +203,24 @@ def get_global_idx(idx, box):
     return idx_n
 
 
-
 #5. grad_direction
 # Find grad/dis max point.
 def find_max_area(im):
     
     im_ = im.astype(np.uint8)
-    cv2.imwrite('all_area.bmp', im)
+    #cv2.imwrite('all_area.bmp', im)
     im_show = im.copy()
     sz = im.shape
     c_im_show = np.zeros((sz[0], sz[1], 3))
     _, contours, hierarchy = cv2.findContours(im_, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    cv2.drawContours(c_im_show, contours, -1, (0, 255, 0), 1)
-    cv2.imwrite('contours.bmp', c_im_show)
+    #cv2.drawContours(c_im_show, contours, -1, (0, 255, 0), 1)
+    #cv2.imwrite('contours.bmp', c_im_show)
     area = []
     for i in range(len(contours)):
-        #area.append(cv2.contourArea(contours[i]))
         area.append(len(contours[i]))
 
     max_idx = np.argmax(area)
     max_area = contours[max_idx]
-    #pdb.set_trace()
     max_area_s = [max_area[1][0][1], max_area[1][0][0]]
     
     for i in range(len(max_area)):
@@ -228,7 +230,7 @@ def find_max_area(im):
         c_im_show[p[1]][p[0]][2] = 255
 
 
-    cv2.imwrite('area_max.bmp', c_im_show)
+    #cv2.imwrite('area_max.bmp', c_im_show)
         
     return max_area_s
 
@@ -291,7 +293,7 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
     sz = im_gray.shape
 
     im_c = im.copy()
-    im_show = im_gray.copy()
+    #im_show = im_gray.copy()
     im_cc = np.zeros((sz[0], sz[1]))
 
     im_ellip = np.ones((sz[0], sz[1], 3)) * 255
@@ -326,7 +328,7 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
         #cv2.rectangle(im_c, (box[0], box[1]), (box[2], box[3]),  (0,255,0), 1)
         #cv2.imwrite('grad_dire.bmp', im_c )
 
-        im_show[box[1]:box[3], box[0]:box[2]] = im_at
+        #im_show[box[1]:box[3], box[0]:box[2]] = im_at
         #flag = 255
         im_cc[g_idx[0]][g_idx[1]] = flag       
 
@@ -334,57 +336,39 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
         for j in range(sz[1]):
             if im_cc[i][j] > 0:
                 #im_c[i][j] = im_cc[i][j]
-                #im_c[i][j] = 255
+                im_c[i][j] = green
                 total_pset.append([i, j])
-    
-    
-    #c_list = connect(total_pset)
-    c_list, p_s, p_e = connect_obey_dire(total_pset, [ellipse_info[0][1], ellipse_info[0][0]])
+    im_show = im_c.copy()
+    center = [ellipse_info[0][1], ellipse_info[0][0]]
+    c_list, p_s, p_e = connect_obey_polar(total_pset, center, dire_thresh=0.2, polar_off=0.02, r_off=20)
+
     im_conn = np.zeros((sz[0], sz[1], 3))
     im_conn = connect_line(c_list, im_conn)
-    im_show = im_conn.copy()
-    im_contours = im_conn[:,:,0].astype(np.uint8)
-    #Draw contours
-    c_im_show = np.zeros((sz[0], sz[1], 3))
-    _, contours, hierarchy = cv2.findContours(im_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    count = 0
-    for i in range(len(contours)):
-        c_ = contours[count]
-        if len(c_) < 50:
-            contours.remove(c_)
-            count -= 1
-        count += 1
-
-    cv2.drawContours(c_im_show, contours, -1, (0, 255, 0), 1)
-    #cv2.imwrite('re_contours_before.bmp', c_im_show)
-    
-    #cv2.imwrite('re_contours.bmp', c_im_show)
-    ced_list = []
-    color = np.array((255, 255, 255))
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            if c_im_show[i][j][1] == 255:
-                #im_c[i-1:i+2, j-1:j+2, 0:3] = color
-                #im_c[i][j][0:3] = color
-                ced_list.append([i, j])
-    c2_list, _, _ = connect_obey_dire(ced_list, [ellipse_info[0][1], ellipse_info[0][0]])
-    im_conn2 = np.zeros((sz[0], sz[1], 3))
-    im_conn2 = connect_line(c2_list, im_conn2, 200)
-    im_show = im_conn2.copy()
 
     for i in range(sz[0]):
         for j in range(sz[1]):
-            if im_show[i][j][1] == 255:
+            if im_conn[i][j][1] == 255:
                 #im_c[i-1:i+2, j-1:j+2, 0:3] = color
-                im_c[i][j][0:3] = color
-    '''
+                im_c[i][j][0:3] = white
+    #tmp
+    for i in range(len(c_list)):
+        p = c_list[i]
+        x = p[0]
+        y = p[1]
+        im_show[x][y][0:3] = black
+        im_c[x][y][0:3] = black
+    #tmp
+
+
+
+    # Label start(red) and end(green) point.
     i = p_s[0]
     j = p_s[1]
-    im_c[i-1:i+2, j-1:j+2, 0:3] = np.array((0, 0, 255))
+    im_c[i-1:i+2, j-1:j+2, 0:3] = red
     i = p_e[0]
     j = p_e[1]
-    im_c[i-1:i+2, j-1:j+2, 0:3] = np.array((0, 255, 0))
-    '''
+    im_c[i-1:i+2, j-1:j+2, 0:3] = green
+    
     return im_c, im_show
 
 
