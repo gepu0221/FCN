@@ -180,7 +180,7 @@ def ellip_to_circle(p, w, h, center):
     else:
         normal_r = int(h/2)
 
-    cos, sin = polar_transform(p, center)
+    cos, sin, r = polar_transform(p, center)
     #pdb.set_trace()
     p_cir = [0, 0]
     p[1] = int(center[0] + cos*normal_r)
@@ -194,12 +194,19 @@ def ellip_to_circle_nearby(p, rate1, rate2, center):
     '''
 
     cos, sin, r = polar_transform(p, center)
-    #pdb.set_trace()
-    p_cir = [0, 0]
-    p[1] = int(center[0] + cos*r*rate1)
-    p[0] = int(center[1] + sin*r*rate2)
 
-    return p
+    p_cir = [0, 0]
+    off0 = cos*r*rate1
+    off1 = sin*r*rate2
+    p_cir[1] = int(center[0] + cos*r*rate1)
+    p_cir[0] = int(center[1] + sin*r*rate2)
+    #print('cos: %g, sin: %g, r: %g' % (cos, sin, r))
+    #print('off0: %g, off1: %g' % (off0, off1))
+    #print('p_cir: ', p_cir)
+    #print('p', p)
+    #pdb.set_trace()
+
+    return p_cir
 
 
 def ellip_cir(ellip_pset, ellipse_info):
@@ -214,15 +221,19 @@ def ellip_cir(ellip_pset, ellipse_info):
         normal_r2 = h
 
     rate1 = normal_r2 / w
-    rate2 = normal_r1 / h
-
+    rate2 = normal_r2 / h
+    #print('w: %d, h: %d' % (w, h))
+    #print('rate1: %g, rate2: %g' % (rate1, rate2))
+    #pdb.set_trace()
     cir_pset = []
     for i in range(len(ellip_pset)):
         #numpy
         p_nu = ellip_pset[i]
         #opencv
-        p_o = [p_nu[1], p_ou[0]]
-        p_new = ellip_to_circle(p_o, rate1, rate2, center)
+        p_o = [p_nu[1], p_nu[0]]
+        p_new = ellip_to_circle_nearby(p_o, rate1, rate2, center)
+        #print('p_old: ', p_nu, ' p_new: ', p_new)
+        #pdb.set_trace()
         cir_pset.append([p_nu, p_new])
 
     return cir_pset
@@ -256,7 +267,9 @@ def main_ec():
         jj = p[0]
         im[ii][jj][0:3] = np.array((255, 0, 0))     
 
-    cv2.imwrite('test_ec/ellipse_c.bmp', im)
+    cv2.imwrite('test_ec/ellipse_c.bmp', im)    
+
+
 
 if __name__ == '__main__':
     main_ec()

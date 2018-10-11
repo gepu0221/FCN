@@ -3,6 +3,12 @@ import pdb
 import cv2
 from utils import *
 
+red = np.array((0, 0, 255))
+green = np.array((0, 255, 0))
+black = np.array((0, 0, 0))
+white = np.array((255, 255, 255))
+
+
 def get_dis(p1, p2):
     
     dis = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
@@ -69,8 +75,8 @@ def if_correct_dire(p1, p2, p_c, thresh):
     #print('cos2: ', cos2)
 
     flag = True
-    #if cos1 > thresh or cos2 < 0.95:
-    if cos1 > thresh or cos2 < 0.9:
+    angle_thresh = 0.9
+    if cos1 > thresh or cos2 < angle_thresh:
         flag = False
     #print('flag: ', flag)
     return flag
@@ -168,6 +174,85 @@ def connect_obey_polar(pset, center, dire_thresh=0.2, polar_off = 0.01, r_off = 
     p_e = c_list[len(c_list)-2]
 
     return c_list, p_s, p_e
+
+def connect_obey_polar_ec(pset, ellipse_info, center, dire_thresh=0.2, polar_off = 0.01, r_off = 5):
+    '''
+    Connect points until return to thr near polar angle the starting point.
+    Transform ellipse to circle to find the correspondence of points.
+    '''
+    c_list = []
+    #p_set2 [p_ellip, p_circle]
+    pset2 = ellip_cir(pset, ellipse_info)
+    p = pset2.pop()
+    p_s = p
+    #calculate polar angle.
+    s_angle, s_r = polar_transform(p_s[0], if_r=True)
+    c_list.append(p[0])
+    count = 0
+    
+    #print('polar_off: %g, r_off: %g' % (polar_off, r_off))
+    while True:
+        
+        min_dis = 200000
+        min_idx = p
+        for i in range(len(pset2)):
+            p_ = pset2[i]
+            dis = get_dis2_true(p[0], p_[0])
+            if dis < min_dis:
+                min_dis = dis
+                min_idx = p_
+        #print('min_dis: %g' % min_dis)
+        #print('min_idx: ', min_idx)
+        #print('p: ', p)
+        #pdb.set_trace()
+        if if_correct_dire(p[1], min_idx[1], center, dire_thresh):
+            c_list.append(min_idx[0])
+            count += 1
+            p = min_idx
+            #Test polar angle if return to starting point.
+            cur_angle, cur_r = polar_transform(min_idx[0], if_r=True)
+            angle_off = np.abs(cur_angle - s_angle)
+            cur_r_off = np.abs(cur_r - s_r)
+            #print('angle_off: ', angle_off)
+            #print('cur_r_off: ', cur_r_off)
+            #print('count: ', count)
+            if angle_off < polar_off and cur_r_off < r_off and count > 100:
+                break
+        pset2.remove(min_idx)
+        #if no points in pset
+        if len(pset2) == 0:
+            break
+        #pdb.set_trace()
+        #print('--------------------')
+    c_list.append(p_s[0])
+    p_e = c_list[len(c_list)-2][0]
+    p_s = p_s[0]
+
+    return c_list, p_s, p_e
+
+#tmp
+def connect_obey_polar_ec_test(im, pset, ellipse_info, center, dire_thresh=0.2, polar_off = 0.01, r_off = 5):
+    '''
+    Connect points until return to thr near polar angle the starting point.
+    Transform ellipse to circle to find the correspondence of points.
+    '''
+    c_list = []
+    #p_set2 [p_ellip, p_circle]
+    pset2 = ellip_cir(pset, ellipse_info)
+    sz = im.shape
+    im_c = im.copy()
+
+    for i in range(len(pset2)):
+        p_e = pset2[i][0]
+        p_c = pset2[i][1]
+        #print('p_e: ', p_e, ' p_c: ', p_c)
+        #pdb.set_trace()
+        im[p_e[0]][p_e[1]] = green
+        im_c[p_c[0]][p_c[1]] = white
+            
+    cv2.imwrite('test_ec/e.bmp', im)
+    cv2.imwrite('test_ec/c.bmp', im_c)
+    pdb.set_trace()
 
 def connect_speed(pset):
     

@@ -81,7 +81,7 @@ def thresh_inv(im, thresh):
 
     return im_at/255
 
-def find_max_grad_continue(grad_map, index, pre_idx, center):
+def find_max_grad_continue(grad_map, index, pre_idx, center, m_dis1=1, m_dis2=4):
     
     max_grad = 0
     max_index = index
@@ -96,7 +96,7 @@ def find_max_grad_continue(grad_map, index, pre_idx, center):
                 dis2 = 0
             else:
                 dis2 = find_pair_dis(pre_idx, [i,j], sz)
-            dis = dis1 + dis2 * 1
+            dis = dis1 + dis2 * m_dis2
             grad_dis = grad_map[i][j]/dis
             dis_map[i][j] = int(grad_dis)
             if max_grad < grad_dis:
@@ -336,11 +336,15 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
         for j in range(sz[1]):
             if im_cc[i][j] > 0:
                 #im_c[i][j] = im_cc[i][j]
-                im_c[i][j] = green
+                #im_c[i][j] = green
                 total_pset.append([i, j])
     im_show = im_c.copy()
     center = [ellipse_info[0][1], ellipse_info[0][0]]
-    c_list, p_s, p_e = connect_obey_polar(total_pset, center, dire_thresh=0.2, polar_off=0.02, r_off=20)
+    #c_list, p_s, p_e = connect_obey_polar(total_pset, center, dire_thresh=0.2, polar_off=0.02, r_off=20)
+    c_list, p_s, p_e = connect_obey_polar_ec(total_pset, ellipse_info, center, dire_thresh=0.15, polar_off=0.02, r_off=20)
+    #c_list, p_s, p_e = connect_obey_polar_ec_test(im_c, total_pset, ellipse_info, center, dire_thresh=0.15, polar_off=0.02, r_off=20)
+
+
 
     im_conn = np.zeros((sz[0], sz[1], 3))
     im_conn = connect_line(c_list, im_conn)
@@ -359,16 +363,20 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
         im_c[x][y][0:3] = black
     #tmp
 
-
+    
 
     # Label start(red) and end(green) point.
+    '''
     i = p_s[0]
     j = p_s[1]
+    print('i: %d, j: %d' % (i,j))
+    pdb.set_trace()
     im_c[i-1:i+2, j-1:j+2, 0:3] = red
     i = p_e[0]
     j = p_e[1]
     im_c[i-1:i+2, j-1:j+2, 0:3] = green
-    
+    '''
+
     return im_c, im_show
 
 
