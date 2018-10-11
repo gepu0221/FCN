@@ -81,7 +81,7 @@ def thresh_inv(im, thresh):
 
     return im_at/255
 
-def find_max_grad_continue(grad_map, index, pre_idx, center, m_dis1=1, m_dis2=4):
+def find_max_grad_continue(grad_map, index, pre_idx, center, m_dis1=1, m_dis2=8):
     
     max_grad = 0
     max_index = index
@@ -155,52 +155,6 @@ def find_grad_continue_setnum(grad_crop, label_crop, pre_idx, center):
     
 
     return re_crop, label_pset, grad_pset, pre_idx, im_at
-
-def get_local_pre_idx(pre_idx_o, box):
-    
-    pre_idx = pre_idx_o.copy()
-   
-    if pre_idx[0] >= box[3]:
-        pre_idx[0] = box[3] - 1
-    if pre_idx[1] >= box[2]:
-        pre_idx[1] = box[2] - 1
-    if pre_idx[0] < box[1]:
-        pre_idx[0] = box[1]
-    if pre_idx[1] < box[0]:
-        pre_idx[1] = box[0]
-   
-    pre_idx[0] -= box[1]
-    pre_idx[1] -= box[0]
-
-    return pre_idx
-
-
-def get_absolute_local_idx(idx_o, box):
-    
-    #axis type: cv2 to numpy    
-    idx = idx_o.copy()
-    idx[0] -= box[0]
-    idx[1] -= box[1]
-
-    return [idx[1], idx[0]]
-
-def get_global_pre_idx(pre_idx_o, box):
-
-    pre_idx = pre_idx_o.copy()
-    
-    pre_idx[0] += box[0]
-    pre_idx[1] += box[1]
-
-    return pre_idx
-
-def get_global_idx(idx, box):
-    
-    idx_n = idx.copy()
-    
-    idx_n[0] = idx[0] + box[1]
-    idx_n[1] = idx[1] + box[0]
-
-    return idx_n
 
 
 #5. grad_direction
@@ -298,11 +252,22 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
 
     im_ellip = np.ones((sz[0], sz[1], 3)) * 255
     cv2.ellipse(im_ellip, ellipse_info, (0,0,255),1)
+    '''
+    #tmp
+    e_list = []
+    for i in range(sz[0]):
+        for j in range(sz[1]):
+            if im_ellip[i][j][0] == 0:
+                e_list.append([i, j])
+           
+    #tmp
+    '''
     box_list, pset = get_point_box(im_ellip, im_c)
     box_list = get_new_box_list(box_list, p_s)
     pre_idx = None
     total_pset = []
-
+    
+    #1. Two times to find origin pset.
     for i in range(len(box_list)):
      
         #box axis type: cv2
@@ -338,46 +303,44 @@ def find_grad_im2(im, im_gray, ellipse_info, p_s):
                 #im_c[i][j] = im_cc[i][j]
                 #im_c[i][j] = green
                 total_pset.append([i, j])
-    im_show = im_c.copy()
+    #im_show = im_c.copy()
+
+    #2.Filter points with angle and dis constraint.
     center = [ellipse_info[0][1], ellipse_info[0][0]]
     #c_list, p_s, p_e = connect_obey_polar(total_pset, center, dire_thresh=0.2, polar_off=0.02, r_off=20)
     c_list, p_s, p_e = connect_obey_polar_ec(total_pset, ellipse_info, center, dire_thresh=0.15, polar_off=0.02, r_off=20)
     #c_list, p_s, p_e = connect_obey_polar_ec_test(im_c, total_pset, ellipse_info, center, dire_thresh=0.15, polar_off=0.02, r_off=20)
 
-
-
+    #3.Use filtered points to connect line.
     im_conn = np.zeros((sz[0], sz[1], 3))
     im_conn = connect_line(c_list, im_conn)
-
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            if im_conn[i][j][1] == 255:
-                #im_c[i-1:i+2, j-1:j+2, 0:3] = color
-                im_c[i][j][0:3] = white
-    #tmp
-    for i in range(len(c_list)):
-        p = c_list[i]
-        x = p[0]
-        y = p[1]
-        im_show[x][y][0:3] = black
-        im_c[x][y][0:3] = black
-    #tmp
-
+           
+    #LabelSpecificPoint(im_conn, im_c, flag=255, color=white, l=0, if_single_channel=1)
+    #LabelPlistPoint(c_list, im_c, black, 0)
     
+    #4.Generate Label image
+    #im_label = np.zeros((sz[0], sz[1], 3))
+    #LabelSpecificPoint(im_conn, im_label, flag=255, color=white, l=3, if_single_channel=0)
+    #tmp
+    #LabelPlistPoint(e_list, im_label, green, 3)
+    #im_label = dilate_(im_conn, 3)
+    #tmp
+    #im_ellip = np.zeros((sz[0], sz[1], 3)) 
+    #cv2.ellipse(im_ellip, ellipse_info, (0,0,255),1)
+    #im_e_dilate = dilate_(im_ellip, 3)
+    #tmp
+    #im_label = im_conn.copy()
+    #LabelSpecificPoint(im_ellip, im_label, flag=255, color=green, l=0, if_single_channel=2)
+
 
     # Label start(red) and end(green) point.
     '''
-    i = p_s[0]
-    j = p_s[1]
-    print('i: %d, j: %d' % (i,j))
-    pdb.set_trace()
-    im_c[i-1:i+2, j-1:j+2, 0:3] = red
-    i = p_e[0]
-    j = p_e[1]
-    im_c[i-1:i+2, j-1:j+2, 0:3] = green
+    Label_point(im_c, p_s, 1, red)
+    Label_point(im_c, p_e, 1, green)
     '''
 
-    return im_c, im_show
+    #return im_c, im_show
+    return im_c, im_conn
 
 
 def find_grad_im(im, im_gray, ellipse_info):

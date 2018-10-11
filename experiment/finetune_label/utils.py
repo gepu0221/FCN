@@ -157,7 +157,57 @@ def result_show(im_show, im_cc, crop, box, im_crop):
     for i in range(len(im_crop)):
         im_show[box[1]:box[3], box[0]:box[2]] = im_crop[i]
 
-#5. transform
+def Label_point(im, p, l, color, if_reverse=False):
+    '''
+    Args:
+        l: label length.
+        color: label color.
+        if_turn: point axis if reverse
+    '''
+    if if_reverse:
+        i = p[1]
+        j = p[0]
+    else:
+        i = p[0]
+        j = p[1]
+        
+    l_i = i-l
+    r_i = i+l+1
+    l_j = j-l
+    r_j = j+l+1
+    #print('l: ', l)
+    #print('i: %d, %d-%d, j: %d, %d-%d' % (i, l_i, r_i, j, l_j, r_j))
+    
+    im[l_i:r_i, l_j:r_j, 0:3] = color
+
+def LabelSpecificPoint(im_src, im_dst, flag, color, l, if_single_channel=-1):
+    '''
+    Check location in src_im which is flag.
+    Label it in dst_im using re_color and length(l).
+    Args:
+        if_single_channel: if it >0, choose specific channel to jugde if flag
+    '''
+    if if_single_channel<0 or if_single_channel >2:
+        raise Exception('Channel Error!!')
+    ch = if_single_channel
+    sz = im_src.shape
+    for i in range(sz[0]):
+        for j in range(sz[1]):
+            if im_src[i][j][ch] == flag:
+                Label_point(im_dst, [i,j], l, color)
+
+def LabelPlistPoint(pset, dst_im, color, l, if_reverse=False):
+    '''
+    Label points in pset(list) to dst_im using color.
+    '''
+    
+    for i in range(len(pset)):
+        p = pset[i]
+        #print('p: ', p)
+        Label_point(dst_im, p, l, color, if_reverse)
+        #pdb.set_trace()
+
+#5. ellipse to circle transform
 def polar_transform(p, center):
     #numpy axis
     cx = center[0]
@@ -204,7 +254,6 @@ def ellip_to_circle_nearby(p, rate1, rate2, center):
     #print('off0: %g, off1: %g' % (off0, off1))
     #print('p_cir: ', p_cir)
     #print('p', p)
-    #pdb.set_trace()
 
     return p_cir
 
@@ -233,7 +282,6 @@ def ellip_cir(ellip_pset, ellipse_info):
         p_o = [p_nu[1], p_nu[0]]
         p_new = ellip_to_circle_nearby(p_o, rate1, rate2, center)
         #print('p_old: ', p_nu, ' p_new: ', p_new)
-        #pdb.set_trace()
         cir_pset.append([p_nu, p_new])
 
     return cir_pset
@@ -268,6 +316,54 @@ def main_ec():
         im[ii][jj][0:3] = np.array((255, 0, 0))     
 
     cv2.imwrite('test_ec/ellipse_c.bmp', im)    
+
+
+#6.Local and global axis transform.
+def get_local_pre_idx(pre_idx_o, box):
+    
+    pre_idx = pre_idx_o.copy()
+   
+    if pre_idx[0] >= box[3]:
+        pre_idx[0] = box[3] - 1
+    if pre_idx[1] >= box[2]:
+        pre_idx[1] = box[2] - 1
+    if pre_idx[0] < box[1]:
+        pre_idx[0] = box[1]
+    if pre_idx[1] < box[0]:
+        pre_idx[1] = box[0]
+   
+    pre_idx[0] -= box[1]
+    pre_idx[1] -= box[0]
+
+    return pre_idx
+
+
+def get_absolute_local_idx(idx_o, box):
+    
+    #axis type: cv2 to numpy    
+    idx = idx_o.copy()
+    idx[0] -= box[0]
+    idx[1] -= box[1]
+
+    return [idx[1], idx[0]]
+
+def get_global_pre_idx(pre_idx_o, box):
+
+    pre_idx = pre_idx_o.copy()
+    
+    pre_idx[0] += box[0]
+    pre_idx[1] += box[1]
+
+    return pre_idx
+
+def get_global_idx(idx, box):
+    
+    idx_n = idx.copy()
+    
+    idx_n[0] = idx[0] + box[1]
+    idx_n[1] = idx[1] + box[0]
+
+    return idx_n
 
 
 
