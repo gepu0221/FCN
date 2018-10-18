@@ -46,7 +46,7 @@ def caculate_accurary(pred_annotation,annotation):
     else:
         accu_pixel=pred_p_c_num/anno_num*100
     #print('Caculate accurary...')
-    print('pred_p_c_num:%d, iou_deno:%d, anno_num:%d' % (pred_p_c_num, iou_deno, anno_num))
+    #print('pred_p_c_num:%d, iou_deno:%d, anno_num:%d' % (pred_p_c_num, iou_deno, anno_num))
 
     return accu_iou, accu_pixel
 

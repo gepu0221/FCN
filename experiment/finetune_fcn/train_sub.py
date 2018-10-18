@@ -133,7 +133,7 @@ class SeqFCNNet(FCNNet):
     def view_one(self, fn, pred_anno, pred_pro, im, step):
         path_ = os.path.join(cfgs.view_path, 'train')
         
-        if cfgs.test_accu:
+        if cfgs.test_view:
             filename = fn.strip().decode('utf-8')
         else:
             filename = str(step)+'_'+fn.strip().decode('utf-8')
@@ -159,7 +159,7 @@ class SeqFCNNet(FCNNet):
 
     def view_one_valid(self, fn, pred_anno, pred_pro, im, step):
         path_ = os.path.join(cfgs.view_path, 'valid')
-        if cfgs.test_accu:
+        if cfgs.test_view:
             filename = fn.strip().decode('utf-8')
         else:
             filename = str(step)+'_'+fn.strip().decode('utf-8')
@@ -184,59 +184,7 @@ class SeqFCNNet(FCNNet):
                 self.view_one_valid(fns[i], pred_annos[i], pred_pros[i], ims[i], step)   
 
 
-    def vis_one_im(self):
-        if cfgs.anno:
-            im_ = pred_visualize(self.vis_image.copy(), self.vis_pred).astype(np.uint8)
-            utils.save_image(im_, self.re_save_dir_im, name='inp_' + self.filename + '.jpg')
-        if cfgs.fit_ellip:
-            #im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
-            im_ellip = fit_ellipse(self.vis_image.copy(), np.expand_dims(self.vis_pred, axis=2).astype(np.uint8))
-            
-            utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_' + self.filename + '.jpg')
-        if cfgs.heatmap:
-            heat_map = density_heatmap(self.vis_pred_prob[:, :, 1])
-            utils.save_image(heat_map, self.re_save_dir_heat, name='heat_' + self.filename + '.jpg')
-        if cfgs.trans_heat and cfgs.heatmap:
-            trans_heat_map = translucent_heatmap(self.vis_image.astype(np.uint8).copy(), heat_map.astype(np.uint8).copy())
-            utils.save_image(trans_heat_map, self.re_save_dir_transheat, name='trans_heat_' + self.filename + '.jpg')
-            utils.save_image(im_, self.re_save_dir_im, name='fuse_' + self.filename + '.jpg')
-        if cfgs.lower_anno:
-            im_ = pred_visualize(self.vis_image.copy(), self.vis_pred_lower).astype(np.uint8)
-            utils.save_image(im_, self.re_save_dir_im, name='inp_lower_' + self.filename + '.jpg')
-        if cfgs.fit_ellip_lower:
-            im_ellip = fit_ellipse_findContours(self.vis_image.copy(), np.expand_dims(self.vis_pred_lower, axis=2).astype(np.uint8))
-            utils.save_image(im_ellip, self.re_save_dir_ellip, name='ellip_lower' + self.filename + '.jpg')
-        
-            
-
-    #Visualize the result
-    def visualize(self, sess):
-        sess.run(self.vis_init)
-        
-        self.create_re_dir()
-
-        count = 0
-        t0 = time.time()
-
-        try:
-            total_loss = 0
-            while True:
-                count += 1
-                images_, cur_ims, annos_, filenames_ = sess.run([self.vis_images, self.vis_cur_images, self.vis_annotations, self.vis_filenames])
-                pred_anno, pred_prob = sess.run([self.pred_annotation, self.pro], feed_dict={self.images: images_})
-                pred_anno = np.squeeze(pred_anno, axis=3)
-                
-                for i in range(len(pred_anno)):
-                    self.filename = filenames_[i].strip().decode('utf-8')
-                    self.vis_image = cur_ims[i]
-                    self.vis_anno = annos_[i]
-                    self.vis_pred = pred_anno[i]
-                    self.vis_pred_prob = pred_prob[i]
-                    self.vis_one_im()
-        except tf.errors.OutOfRangeError:
-            pass
-
-                    
+                        
 
     #Evaluate all validation dataset once 
     def valid_once(self, sess, writer, epoch, step):
@@ -310,8 +258,8 @@ class SeqFCNNet(FCNNet):
                 #cv2.imwrite('%s_anno.bmp' % filenames[0], annos_[0]*255)
                 #pdb.set_trace()
                 cur_batch_size = images_.shape[0]
-                #pred_anno_, pred_seq_pro_, summary_str, loss, _ = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.train_op],
-                pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
+                pred_anno_, pred_seq_pro_, summary_str, loss, _ = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op],
+                #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
                 #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss],
                                                                 feed_dict={self.images: images_, 
                                                                          self.annotations: annos_, self.lr: self.learning_rate,
