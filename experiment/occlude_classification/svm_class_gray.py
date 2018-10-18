@@ -22,16 +22,16 @@ def train():
         if not os.path.exists(label_fn):
             print('%s not found. Skip!' % fn)
             continue
-        im = cv2.imread(im)
+        im = cv2.imread(im, 0)
         im_sz = im.shape
         rate = 4
-        im = cv2.resize(im, (int(im_sz[1]/rate), int(im_sz[0]/rate)), interpolation=cv2.INTER_CUBIC)
+        #im = cv2.resize(im, (int(im_sz[1]/rate), int(im_sz[0]/rate)), interpolation=cv2.INTER_CUBIC)
         label = cv2.imread(label_fn)
-        label = cv2.resize(label,(int(im_sz[1]/rate), int(im_sz[0]/rate)), interpolation=cv2.INTER_CUBIC) 
+        #label = cv2.resize(label,(int(im_sz[1]/rate), int(im_sz[0]/rate)), interpolation=cv2.INTER_CUBIC) 
         cv2.imwrite('label.bmp', label)
         label = label[:, :, 0]/255
 
-        im  = np.reshape(im, (-1, 3))
+        im  = np.reshape(im, (-1, 1))
         label = np.reshape(label,(-1)).astype(np.int32)
         data_list.extend(list(im))
         label_list.extend(list(label))
@@ -46,7 +46,8 @@ def train():
     print('Train time is %g.' % (time.time() - t1))
 
     #Save model
-    model_n = 'train_model1017.m'
+    #model_n = 'train_model1017.m'
+    model_n = 'train_model_gray1018.m'
     root_path = 'model'
     if not os.path.exists(root_path):
         os.makedirs(root_path)
@@ -61,7 +62,8 @@ def predict():
     
     #Load model
     #model_n = 'train_model1017.m'
-    model_n = 'train_model1016.m'
+    #model_n = 'train_model1016.m'
+    model_n = 'train_model_gray1018.m'
     root_path = 'model'
     load_path = os.path.join(root_path, model_n)
     if not os.path.exists(load_path):
@@ -76,16 +78,17 @@ def predict():
 
     for im in im_list:
         fn = os.path.splitext(im.split('/')[-1])[0]
-        pred_fn = os.path.join(data_path, 'valid', 'predict', fn+'_1016.bmp')
+        pred_fn = os.path.join(data_path, 'valid', 'predict', fn+'_1018.bmp')
        
-        im = cv2.imread(im)
+        im = cv2.imread(im, 0)
         sz = im.shape
         rate = 4
-        im = cv2.resize(im, (int(sz[1]/rate), int(sz[0]/rate)), interpolation=cv2.INTER_CUBIC)
+        #im = cv2.resize(im, (int(sz[1]/rate), int(sz[0]/rate)), interpolation=cv2.INTER_CUBIC)
 
-        im  = np.reshape(im, (-1, 3))
+        im  = np.reshape(im, (-1, 1))
         pred = svc.predict(im)
-        pred = np.reshape(pred, (int(sz[0]/rate), int(sz[1]/rate)))
+        #pred = np.reshape(pred, (int(sz[0]/rate), int(sz[1]/rate)))
+        pred = np.reshape(pred, (sz[0], sz[1]))
         cv2.imwrite(pred_fn, pred*255)
 
 def show():
@@ -108,7 +111,7 @@ def show():
     
 
 def main():
-    #train()
+    train()
     predict()
 
 
