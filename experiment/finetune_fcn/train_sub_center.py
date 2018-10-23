@@ -86,12 +86,13 @@ class SeqFCNNet(FCNNet):
         #sz = [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 1]
         #coord_m = tf.zeros(sz, dtype=tf.int64)
         #comp = tf.ones(sz, dtype=tf.int64)
-        pred_sum = tf.reduce_sum(self.pro[:, :, :, 1], [1, 2])
-        self.pred_cx = tf.reduce_mean(tf.multiply(self.pro[:, :, :, 1], self.coord_x_tensor), [1, 2])
-        self.pred_cy = tf.reduce_mean(tf.multiply(self.pro[:, :, :, 1], self.coord_y_tensor), [1, 2])
+        pred_sum = tf.cast(tf.reduce_sum(self.pro[:, :, :, 1], [1, 2]), dtype=tf.float32)
+        self.pred_cx = tf.reduce_sum(tf.multiply(self.pro[:, :, :, 1], self.coord_x_tensor), [1, 2]) / pred_sum
+        self.pred_cy = tf.reduce_sum(tf.multiply(self.pro[:, :, :, 1], self.coord_y_tensor), [1, 2]) / pred_sum
         
-        self.anno_cx = tf.reduce_mean(tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_x_tensor), [1, 2])
-        self.anno_cy = tf.reduce_mean(tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_y_tensor), [1, 2])
+        anno_sum = tf.cast(tf.reduce_sum(tf.squeeze(self.annotations, squeeze_dims=[3]), [1, 2]), dtype=tf.float32)
+        self.anno_cx = tf.reduce_sum(tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_x_tensor), [1, 2]) / anno_sum
+        self.anno_cy = tf.reduce_sum(tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_y_tensor), [1, 2]) / anno_sum
         
         self.center_loss = tf.reduce_mean(tf.pow((self.pred_cx - self.anno_cx), 2) + tf.pow((self.pred_cy - self.anno_cy), 2))
 
@@ -326,8 +327,8 @@ class SeqFCNNet(FCNNet):
                                                                          self.coord_y_tensor: coord_map_y_cur})
                 
 
-
-                print('anno_c:(%g, %g), pred_c: (%g, %g)' % (anno_cx[0], anno_cy[0], pred_cx[0], pred_cy[0]))
+                
+                #print('anno_c:(%g, %g), pred_c: (%g, %g)' % (anno_cx[0], anno_cy[0], pred_cx[0], pred_cy[0]))
                 self.view(filenames, pred_anno_, pred_seq_pro_, images_, step)
                 #2. calculate accurary
                 
