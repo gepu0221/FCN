@@ -130,6 +130,7 @@ class SeqFCNNet(FCNNet):
         anno_lower_comp = tf.pow(anno_lower_comp, 2)
         pred_dis_map_low = tf.where(tf.equal(self.pred_dis_map, 0), anno_lower_comp, self.pred_dis_map)
         offset_lower = anno_lower_comp - pred_dis_map_low
+        #offset_lower = pred_dis_map_low - anno_lower_comp
         pred_lower_m = tf.where(tf.less_equal(offset_lower, 0), zero2_e, offset_lower)
         #pred_lower_m = tf.pow(pred_lower_m, 2)
         #pred_lower_m = tf.multiply(self.pro[:, :, :, 1], pred_lower_m)
@@ -144,6 +145,7 @@ class SeqFCNNet(FCNNet):
         anno_higher_comp = tf.pow(anno_higher_comp, 2)
         pred_dis_map_high = tf.where(tf.equal(self.pred_dis_map, 0), anno_higher_comp, self.pred_dis_map)
         offset_higher = pred_dis_map_high - anno_higher_comp
+        #offset_higher = anno_higher_comp - pred_dis_map_high
         pred_higher_m = tf.where(tf.less_equal(offset_higher, 0), zero2_e, offset_higher)
         #pred_higher_m = tf.pow(pred_higher_m, 2)
         #pred_higher_m = tf.multiply(self.pro[:, :, :, 1], pred_higher_m)
@@ -317,6 +319,9 @@ class SeqFCNNet(FCNNet):
                                self.cur_batch_size: cur_batch_size,
                                self.coord_x_tensor: coord_map_x_cur,
                                self.coord_y_tensor: coord_map_y_cur,
+                               #self.coord_y_tensor: coord_map_x_cur,
+                               #self.coord_x_tensor: coord_map_y_cur,
+
                                self.ellip_low: ellip_info_low,
                                self.ellip_high: ellip_info_high})
                 
@@ -332,11 +337,11 @@ class SeqFCNNet(FCNNet):
                     print('\r' + 12 * ' ', end='')
                     print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
         
-                #End valid data
-                #count -= 1
-                print('epoch %5d\t learning_rate = %g\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % 
-                (epoch, self.learning_rate, total_loss/count, sum_acc/count, sum_acc_iou/count, sum_acc_ellip/count))
-                print('Take time %3.1f' % (time.time() - t0))
+            #End valid data
+            #count -= 1
+            print('epoch %5d\t learning_rate = %g\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % 
+            (epoch, self.learning_rate, total_loss/count, sum_acc/count, sum_acc_iou/count, sum_acc_ellip/count))
+            print('Take time %3.1f' % (time.time() - t0))
 
 
         except tf.errors.OutOfRangeError:
@@ -394,6 +399,9 @@ class SeqFCNNet(FCNNet):
                                                                              self.cur_batch_size: cur_batch_size,
                                                                              self.coord_x_tensor: coord_map_x_cur,
                                                                              self.coord_y_tensor: coord_map_y_cur,
+                                                                             #self.coord_y_tensor: coord_map_x_cur,
+                                                                             #self.coord_x_tensor: coord_map_y_cur,
+
                                                                              self.ellip_low: ellip_info_low,
                                                                              self.ellip_high: ellip_info_high})
                     
