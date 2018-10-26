@@ -49,6 +49,7 @@ class SeqFCNNet(FCNNet):
         
         self.ellip_low = tf.placeholder(tf.float32, shape=[None], name='ellipse_info_lower_axis')
         self.ellip_high = tf.placeholder(tf.float32, shape=[None], name='ellipse_info_higher_axis')
+        self.ellip_axis = tf.placeholder(tf.float32, shape=[None], name='ellipse_info_mean_axis')
 
         accu.create_ellipse_f()
         self.e_acc = accu.Ellip_acc()
@@ -91,13 +92,22 @@ class SeqFCNNet(FCNNet):
         comp = tf.ones(sz, dtype=tf.float32)
         zero_e = tf.zeros([1, cfgs.batch_size], dtype=tf.float32)
         zero2_e = tf.zeros(sz, dtype=tf.float32)
-
+        
+        '''
         pred_sum = tf.cast(tf.reduce_sum(self.pro[:, :, :, 1], [1, 2]), dtype=tf.float32)
         pred_x = tf.multiply(self.pro[:, :, :, 1], self.coord_x_tensor)
         pred_y = tf.multiply(self.pro[:, :, :, 1], self.coord_y_tensor)
         self.pred_cx = tf.reduce_sum(pred_x, [1, 2]) / pred_sum
         self.pred_cy = tf.reduce_sum(pred_y, [1, 2]) / pred_sum
+        '''
+        self.pro_higher = tf.where(tf.less_equal(self.pro[:, :, :, 1], 0.5), zero2_e, self.pro[:, :, :, 1])
+        pred_sum = tf.cast(tf.reduce_sum(self.pro_higher, [1, 2]), dtype=tf.float32)
+        pred_x = tf.multiply(self.pro_higher, self.coord_x_tensor)
+        pred_y = tf.multiply(self.pro_higher, self.coord_y_tensor)
+        self.pred_cx = tf.reduce_sum(pred_x, [1, 2]) / pred_sum
+        self.pred_cy = tf.reduce_sum(pred_y, [1, 2]) / pred_sum
         
+
         anno_sum = tf.cast(tf.reduce_sum(tf.squeeze(self.annotations, squeeze_dims=[3]), [1, 2]), dtype=tf.float32)
         anno_x =  tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_x_tensor)
         anno_y =  tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_y_tensor)
@@ -152,6 +162,60 @@ class SeqFCNNet(FCNNet):
         #-----------------------------------------------
         self.wh_loss = tf.reduce_mean(pred_lower_m + pred_higher_m)
 
+    def center_wh_range_global_loss(self):
+        
+        #prepare
+        sz = [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
+        comp = tf.ones(sz, dtype=tf.float32)
+        zero_e = tf.zeros([1, cfgs.batch_size], dtype=tf.float32)
+        zero2_e = tf.zeros(sz, dtype=tf.float32)
+        
+        pred_sum = tf.cast(tf.reduce_sum(self.pro[:, :, :, 1], [1, 2]), dtype=tf.float32)
+        pred_x = tf.multiply(self.pro[:, :, :, 1], self.coord_x_tensor)
+        pred_y = tf.multiply(self.pro[:, :, :, 1], self.coord_y_tensor)
+        self.pred_cx = tf.reduce_sum(pred_x, [1, 2]) / pred_sum
+        self.pred_cy = tf.reduce_sum(pred_y, [1, 2]) / pred_sum
+       
+
+        anno_sum = tf.cast(tf.reduce_sum(tf.squeeze(self.annotations, squeeze_dims=[3]), [1, 2]), dtype=tf.float32)
+        anno_x =  tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_x_tensor)
+        anno_y =  tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_y_tensor)
+        self.anno_cx = tf.reduce_sum(anno_x, [1, 2]) / anno_sum
+        self.anno_cy = tf.reduce_sum(anno_y, [1, 2]) / anno_sum
+
+        self.center_loss = tf.reduce_mean(tf.pow((self.pred_cx - self.anno_cx), 2) + tf.pow((self.pred_cy - self.anno_cy), 2))
+        #--------------------
+        #pred_cx_m = tf.expand_dims(self.pred_cx, 0)
+        pred_cx_m = tf.expand_dims(self.anno_cx, 0)
+        for i in range(cfgs.batch_size-1):
+            pred_cx_m = tf.concat([pred_cx_m, zero_e], 0)
+        comp_cx = tf.matmul(pred_cx_m, tf.reshape(comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0]*cfgs.IMAGE_SIZE[1]]), transpose_a=True)
+        comp_cx = tf.reshape(comp_cx, [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]])
+        #-------------------
+       
+        #pred_cy_m = tf.expand_dims(self.pred_cy, 0)
+        pred_cy_m = tf.expand_dims(self.anno_cy, 0)
+        for i in range(cfgs.batch_size-1):
+            pred_cy_m = tf.concat([pred_cy_m, zero_e], 0)
+        comp_cy = tf.matmul(pred_cy_m, tf.reshape(comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0]*cfgs.IMAGE_SIZE[1]]), transpose_a=True)
+        comp_cy = tf.reshape(comp_cy, [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]])
+        #self.pred_dis_map = tf.multiply(tf.pow((comp_cx - self.coord_x_tensor), 2), self.pro[:, :, :, 1]) + tf.multiply(tf.pow((comp_cy- self.coord_y_tensor), 2), self.pro[:, :, :, 1])
+        self.pred_dis_map = tf.pow((comp_cx - self.coord_x_tensor), 2) + tf.pow((comp_cy- self.coord_y_tensor), 2)
+        #Lower axis
+        #-------------------------
+        anno_axis_m = tf.expand_dims(self.ellip_axis, 0)
+        for i in range(cfgs.batch_size-1):
+            anno_axis_m = tf.concat([anno_axis_m, zero_e], 0)
+        anno_axis_comp = tf.matmul(anno_axis_m, tf.reshape(comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0]*cfgs.IMAGE_SIZE[1]]), transpose_a=True)
+        anno_axis_comp = tf.reshape(anno_axis_comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]])
+        anno_axis_comp = tf.pow(anno_axis_comp, 2)
+        
+        offset_ = tf.multiply((tf.abs(anno_axis_comp - self.pred_dis_map)), self.pro[:, :, :, 1])
+       
+        #-----------------------------------------------
+        self.wh_loss = tf.reduce_mean(offset_)
+
+
 
     def loss(self):
 
@@ -159,7 +223,7 @@ class SeqFCNNet(FCNNet):
         self.pro = tf.nn.softmax(self.logits)
         self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
         
-        self.center_wh_range_loss()
+        self.center_wh_range_global_loss()
         self.loss = (1-cfgs.center_w-cfgs.dis_w) * tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                                         labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                                         name='entropy_loss'))) + cfgs.center_w * self.center_loss + cfgs.dis_w * self.wh_loss
@@ -195,7 +259,8 @@ class SeqFCNNet(FCNNet):
         
         self.get_data_cache()
         self.loss()
-        self.accurary()
+        self.accuracy()
+        self.accuracy_lower()
         self.train_optimizer()
         self.summary()
 
@@ -287,7 +352,7 @@ class SeqFCNNet(FCNNet):
         sum_acc_ellip = 0
         t0 = time.time()
         
-        if_epoch = False
+        if_epoch = True
         if epoch % 5 == 0:
             if_epoch = True
 
@@ -308,10 +373,11 @@ class SeqFCNNet(FCNNet):
                     
                     ellip_info_low = np.min(ellip_infos_[:, 2:], 1) / 2
                     ellip_info_high = np.max(ellip_infos_[:, 2:], 1) / 2
+                    ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
 
                     pred_anno, pred_seq_pro, summary_str, loss, self.accu, self.accu_iou = sess.run(
-                    fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
-                    #fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss],
+                    #fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
+                    fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
                     feed_dict={self.images: images_, 
                                self.annotations: annos_, self.lr: self.learning_rate,
                                self.keep_prob: 1,
@@ -319,11 +385,10 @@ class SeqFCNNet(FCNNet):
                                self.cur_batch_size: cur_batch_size,
                                self.coord_x_tensor: coord_map_x_cur,
                                self.coord_y_tensor: coord_map_y_cur,
-                               #self.coord_y_tensor: coord_map_x_cur,
-                               #self.coord_x_tensor: coord_map_y_cur,
 
-                               self.ellip_low: ellip_info_low,
-                               self.ellip_high: ellip_info_high})
+                               #self.ellip_low: ellip_info_low,
+                               #self.ellip_high: ellip_info_high
+                               self.ellip_axis: ellip_info_mean})
                 
                     #View result
                     self.view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
@@ -360,7 +425,7 @@ class SeqFCNNet(FCNNet):
         mean_acc_iou = 0
         mean_acc_ellip = 0
 
-        if_epoch = False
+        if_epoch = True
         if epoch % 5 == 0:
             if_epoch = True
 
@@ -385,9 +450,12 @@ class SeqFCNNet(FCNNet):
                     
                     ellip_info_low = np.min(ellip_infos_[:, 2:], 1) / 2
                     ellip_info_high = np.max(ellip_infos_[:, 2:], 1) / 2
+                    ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
+
                     #pdb.set_trace()
-                    pred_anno_, pred_seq_pro_, summary_str, loss, loss_center, loss_wh, _, self.accu, self.accu_iou, pred_dis, anno_cx, anno_cy, pred_cx, pred_cy = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.center_loss, self.wh_loss, self.train_op, self.accu_tensor, self.accu_iou_tensor, self.pred_dis_map, self.anno_cx, self.anno_cy, self.pred_cx, self.pred_cy],
-                    
+                    #pred_anno_, pred_seq_pro_, summary_str, loss, loss_center, loss_wh, _, self.accu, self.accu_iou, pred_dis, anno_cx, anno_cy, pred_cx, pred_cy = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.center_loss, self.wh_loss, self.train_op, self.accu_tensor, self.accu_iou_tensor, self.pred_dis_map, self.anno_cx, self.anno_cy, self.pred_cx, self.pred_cy],
+                    pred_anno_, pred_seq_pro_, summary_str, loss, loss_center, loss_wh, self.accu, self.accu_iou, pred_dis, anno_cx, anno_cy, pred_cx, pred_cy = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.center_loss, self.wh_loss, self.accu_tensor_lower, self.accu_iou_tensor_lower, self.pred_dis_map, self.anno_cx, self.anno_cy, self.pred_cx, self.pred_cy],
+ 
                     #pred_anno_, pred_seq_pro_, summary_str, loss, loss_center, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.center_loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
                     #pred_anno_, pred_seq_pro_, summary_str, loss, _ = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op],
                     #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
@@ -402,8 +470,9 @@ class SeqFCNNet(FCNNet):
                                                                              #self.coord_y_tensor: coord_map_x_cur,
                                                                              #self.coord_x_tensor: coord_map_y_cur,
 
-                                                                             self.ellip_low: ellip_info_low,
-                                                                             self.ellip_high: ellip_info_high})
+                                                                             #self.ellip_low: ellip_info_low,
+                                                                             #self.ellip_high: ellip_info_high,
+                                                                             self.ellip_axis: ellip_info_mean})
                     
 
                     

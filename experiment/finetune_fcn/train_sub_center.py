@@ -46,6 +46,9 @@ class SeqFCNNet(FCNNet):
         self.coord_map_x, self.coord_map_y = self.generate_coord_map(self.batch_size)
         self.coord_x_tensor = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1]], name='coord_x_map_tensor')
         self.coord_y_tensor = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1]], name='coord_y_map_tensor')
+        
+        self.ellip_low = tf.placeholder(tf.float32, shape=[None], name='ellipse_info_lower_axis')
+        self.ellip_high = tf.placeholder(tf.float32, shape=[None], name='ellipse_info_higher_axis')
 
         accu.create_ellipse_f()
         self.e_acc = accu.Ellip_acc()
@@ -149,7 +152,71 @@ class SeqFCNNet(FCNNet):
         self.center_loss = tf.reduce_mean(tf.pow((self.pred_cx - self.anno_cx), 2) + tf.pow((self.pred_cy - self.anno_cy), 2))
         self.wh_loss = tf.reduce_mean(tf.pow((self.anno_dis - self.pred_dis), 2))
 
+    def center_wh_range_loss(self):
+        
+        #prepare
+        sz = [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
+        comp = tf.ones(sz, dtype=tf.float32)
+        zero_e = tf.zeros([1, cfgs.batch_size], dtype=tf.float32)
+        zero2_e = tf.zeros(sz, dtype=tf.float32)
 
+        pred_sum = tf.cast(tf.reduce_sum(self.pro[:, :, :, 1], [1, 2]), dtype=tf.float32)
+        pred_x = tf.multiply(self.pro[:, :, :, 1], self.coord_x_tensor)
+        pred_y = tf.multiply(self.pro[:, :, :, 1], self.coord_y_tensor)
+        self.pred_cx = tf.reduce_sum(pred_x, [1, 2]) / pred_sum
+        self.pred_cy = tf.reduce_sum(pred_y, [1, 2]) / pred_sum
+        
+        anno_sum = tf.cast(tf.reduce_sum(tf.squeeze(self.annotations, squeeze_dims=[3]), [1, 2]), dtype=tf.float32)
+        anno_x =  tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_x_tensor)
+        anno_y =  tf.multiply(tf.cast(tf.squeeze(self.annotations, squeeze_dims=[3]), dtype=tf.float32), self.coord_y_tensor)
+        self.anno_cx = tf.reduce_sum(anno_x, [1, 2]) / anno_sum
+        self.anno_cy = tf.reduce_sum(anno_y, [1, 2]) / anno_sum
+
+        self.center_loss = tf.reduce_mean(tf.pow((self.pred_cx - self.anno_cx), 2) + tf.pow((self.pred_cy - self.anno_cy), 2))
+        #--------------------
+        pred_cx_m = tf.expand_dims(self.pred_cx, 0)
+        for i in range(cfgs.batch_size-1):
+            pred_cx_m = tf.concat([pred_cx_m, zero_e], 0)
+        comp_cx = tf.matmul(pred_cx_m, tf.reshape(comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0]*cfgs.IMAGE_SIZE[1]]), transpose_a=True)
+        comp_cx = tf.reshape(comp_cx, [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]])
+        #-------------------
+        pred_x_comp = tf.where(tf.equal(pred_x, 0), comp_cx, pred_x)
+        pred_cy_m = tf.expand_dims(self.pred_cy, 0)
+        for i in range(cfgs.batch_size-1):
+            pred_cy_m = tf.concat([pred_cy_m, zero_e], 0)
+        comp_cy = tf.matmul(pred_cy_m, tf.reshape(comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0]*cfgs.IMAGE_SIZE[1]]), transpose_a=True)
+        comp_cy = tf.reshape(comp_cy, [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]])
+        pred_y_comp = tf.where(tf.equal(pred_y, 0), comp_cy, pred_y)
+        self.pred_dis_map = tf.pow((comp_cx - pred_x_comp), 2) + tf.pow((comp_cy- pred_y_comp), 2)
+        #Lower axis
+        #-------------------------
+        anno_lower_m = tf.expand_dims(self.ellip_low, 0)
+        for i in range(cfgs.batch_size-1):
+            anno_lower_m = tf.concat([anno_lower_m, zero_e], 0)
+        anno_lower_comp = tf.matmul(anno_lower_m, tf.reshape(comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0]*cfgs.IMAGE_SIZE[1]]), transpose_a=True)
+        anno_lower_comp = tf.reshape(anno_lower_comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]])
+        anno_lower_comp = tf.pow(anno_lower_comp, 2)
+        pred_dis_map_low = tf.where(tf.equal(self.pred_dis_map, 0), anno_lower_comp, self.pred_dis_map)
+        offset_lower = anno_lower_comp - pred_dis_map_low
+        pred_lower_m = tf.where(tf.less_equal(offset_lower, 0), zero2_e, offset_lower)
+        #pred_lower_m = tf.pow(pred_lower_m, 2)
+        pred_lower_m = tf.multiply(self.pro[:, :, :, 1], pred_lower_m)
+        #-----------------------------------------------
+        #High axis
+        #-------------------------
+        anno_higher_m = tf.expand_dims(self.ellip_high, 0)
+        for i in range(cfgs.batch_size-1):
+            anno_higher_m = tf.concat([anno_higher_m, zero_e], 0)
+        anno_higher_comp = tf.matmul(anno_higher_m, tf.reshape(comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0]*cfgs.IMAGE_SIZE[1]]), transpose_a=True)
+        anno_higher_comp = tf.reshape(anno_higher_comp, [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]])
+        anno_higher_comp = tf.pow(anno_higher_comp, 2)
+        pred_dis_map_high = tf.where(tf.equal(self.pred_dis_map, 0), anno_higher_comp, self.pred_dis_map)
+        offset_higher = pred_dis_map_high - anno_higher_comp
+        pred_higher_m = tf.where(tf.less_equal(offset_higher, 0), zero2_e, offset_higher)
+        #pred_higher_m = tf.pow(pred_higher_m, 2)
+        pred_higher_m = tf.multiply(self.pro[:, :, :, 1], pred_higher_m)
+        #-----------------------------------------------
+        self.wh_loss = tf.reduce_mean(pred_lower_m + pred_higher_m)
 
 
     def loss(self):
@@ -158,7 +225,7 @@ class SeqFCNNet(FCNNet):
         self.pro = tf.nn.softmax(self.logits)
         self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
         
-        self.center_wh_loss()
+        self.center_wh_range_loss()
         self.loss = (1-cfgs.center_w-cfgs.dis_w) * tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                                         labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                                         name='entropy_loss'))) + cfgs.center_w * self.center_loss + cfgs.dis_w * self.wh_loss
@@ -338,7 +405,7 @@ class SeqFCNNet(FCNNet):
             print('Error!')
         
         
-    def train_one_epoch(self, sess, writer, epoch, step):
+    def train_one_epoch1(self, sess, writer, epoch, step):
         print('sub_train_one_epoch')
         sum_acc = 0
         sum_acc_iou = 0
@@ -391,6 +458,107 @@ class SeqFCNNet(FCNNet):
                     #print('anno_c:(%g, %g), pred_c: (%g, %g)' % (anno_cx[0], anno_cy[0], pred_cx[0], pred_cy[0]))
                     #print('pred_dis: ', pred_dis)
                     #print('anno_dis: ', anno_dis)
+                    self.view(filenames, pred_anno_, pred_seq_pro_, images_, step)
+                    #2. calculate accurary
+                    
+                    self.calculate_acc(cur_ims_.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                    sum_acc += self.accu
+                    sum_acc_iou += self.accu_iou
+                    sum_acc_ellip += self.ellip_acc
+                    mean_acc = sum_acc/count
+                    mean_acc_iou = sum_acc_iou/count
+                    mean_acc_ellip = sum_acc_ellip/count
+                    #3. calculate loss
+                    total_loss += loss
+                    
+                    #4. time consume
+                    time_consumed = time.time() - t0
+                    time_per_batch = time_consumed/count
+
+                    #5. check if change learning rate
+                    if count % 100 == 0:
+                        self.try_update_lr()
+                    #6. summary
+                    writer.add_summary(summary_str, global_step=step)
+
+                    #6. print
+                    #print('\r' + 2 * ' ', end='')
+                    print('center_loss: %g' % loss_center)
+                    print('wh_loss: %g' % loss_wh)
+                    print('epoch %5d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t mean_loss=%.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f\t time = %.2f' % (epoch, self.learning_rate, step, count, loss, (total_loss/count), mean_acc, mean_acc_iou, mean_acc_ellip, time_per_batch))
+            
+            #End one epoch
+            #count -= 1
+            print('epoch %5d\t learning_rate = %g\t mean_loss = %.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
+            print('Take time %3.1f' % (time.time() - t0))
+
+        except tf.errors.OutOfRangeError:
+            print('Error!')
+            count -= 1
+            print('epoch %5d\t learning_rate = %g\t mean_loss = %.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
+            print('Take time %3.1f' % (time.time() - t0))
+     
+        return step
+
+    def train_one_epoch(self, sess, writer, epoch, step):
+        print('sub_train_one_epoch')
+        sum_acc = 0
+        sum_acc_iou = 0
+        sum_acc_ellip = 0
+        count = 0
+        total_loss = 0
+        t0 =time.time()
+        mean_acc = 0
+        mean_acc_iou = 0
+        mean_acc_ellip = 0
+
+        if_epoch = False
+        if epoch % 5 == 0:
+            if_epoch = True
+
+        try:
+            #self.per_e_train_batch = 2
+            while count<self.per_e_train_batch:
+                step += 1
+                count += 1
+                
+                #1. train
+                images_, cur_ims_, ellip_infos_, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames])
+                
+                #cv2.imwrite('%s_anno.bmp' % filenames[0], annos_[0]*255)
+                #pdb.set_trace()
+                cur_batch_size = images_.shape[0]
+                if cur_batch_size == cfgs.batch_size:
+                    coord_map_x_cur, coord_map_y_cur = self.coord_map_x, self.coord_map_y
+                else:
+                    coord_map_x_cur, coord_map_y_cur = self.generate_coord_map(cur_batch_size)
+                
+                if cur_batch_size == cfgs.batch_size:
+                    
+                    ellip_info_low = np.min(ellip_infos_[:, 2:], 1) / 2
+                    ellip_info_high = np.max(ellip_infos_[:, 2:], 1) / 2
+         
+                    pred_anno_, pred_seq_pro_, summary_str, loss, loss_center, loss_wh, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.center_loss, self.wh_loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
+                    
+                    #pred_anno_, pred_seq_pro_, summary_str, loss, loss_center, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.center_loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
+                    #pred_anno_, pred_seq_pro_, summary_str, loss, _ = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op],
+                    #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss],
+                    #pred_anno_, pred_seq_pro_, summary_str, loss = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss],
+                                                                    feed_dict={self.images: images_, 
+                                                                             self.annotations: annos_, self.lr: self.learning_rate,
+                                                                             self.keep_prob: 1,
+                                                                             self.input_keep_prob: 1,
+                                                                             self.cur_batch_size: cur_batch_size,
+                                                                             self.coord_x_tensor: coord_map_x_cur,
+                                                                             self.coord_y_tensor: coord_map_y_cur,
+                                                                             self.ellip_low: ellip_info_low,
+                                                                             self.ellip_high: ellip_info_high})
+                    
+
+                    
+                    #print('anno_c:(%g, %g), pred_c: (%g, %g)' % (anno_cx[0], anno_cy[0], pred_cx[0], pred_cy[0]))
+                    #print('pred_dis: ', pred_dis)
+                    #print('anno_dis: ', anno_dis)
                     #pdb.set_trace()
                     self.view(filenames, pred_anno_, pred_seq_pro_, images_, step)
                     #2. calculate accurary
@@ -433,6 +601,7 @@ class SeqFCNNet(FCNNet):
             print('Take time %3.1f' % (time.time() - t0))
      
         return step
+
 
 
     #------------------------------------------------------------------------------
