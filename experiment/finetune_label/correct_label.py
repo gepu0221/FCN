@@ -58,16 +58,20 @@ def update_ellip(x_off, y_off, w_off, h_off, ellipse_info):
 
 def main():
     
-    root_file = 's8'
+    root_file = 's6'
     root_dir = '%s/Image' % root_file
     txt_root_dir = root_file
-    re_root_dir = '%s_re_grad_sqrt' % root_file
+    #re_root_dir = '%s_re_grad_sqrt' % root_file
 
     f_txt = open(os.path.join(txt_root_dir, 'groundtruth_.txt'))
-    correct_txt = open(os.path.join(txt_root_dir, 'groundtruth_correct_test_.txt'), 'w')
+    save_path =  os.path.join(txt_root_dir, 'groundtruth_correct.txt')
+    if not os.path.exists(save_path):
+        with open(save_path, 'w') as f:
+            pass
+    #correct_txt = open(os.path.join(txt_root_dir, 'groundtruth_correct_test_.txt'), 'w')
     
-    if not os.path.exists(re_root_dir):
-        os.makedirs(re_root_dir)
+    #if not os.path.exists(re_root_dir):
+        #os.makedirs(re_root_dir)
 
     for line in f_txt:
 
@@ -114,11 +118,12 @@ def main():
         if c == p:
             lx, ly, rx, ry = get_rect(ellipse_info)
             new_line =  '%s %d %d %d %d %d\n' % (f, lx, ly, rx, ry, 0)
-            correct_txt.write(new_line)
+            with open(save_path, 'a') as correct_txt:
+                correct_txt.write(new_line)
             cv2.destroyWindow(filename)
         if c == o:
             break
-    correct_txt.close()
+    #correct_txt.close()
     f_txt.close()
             
 
