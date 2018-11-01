@@ -45,8 +45,10 @@ def caculate_accurary(pred_annotation,annotation):
         accu_pixel=0
     else:
         accu_pixel=pred_p_c_num/anno_num*100
-    #print('Caculate accurary...')
+    print('Caculate accurary...')
     #print('pred_p_c_num:%d, iou_deno:%d, anno_num:%d' % (pred_p_c_num, iou_deno, anno_num))
+    print('pred_p_c_num:%d, pred_num:%d, anno_num:%d' % (pred_p_c_num, pred_p_num, anno_num))
+
 
     return accu_iou, accu_pixel
 
@@ -284,7 +286,7 @@ class Ellip_acc(object):
 
         return loss
 
-    def divide_shelter_once(self, im, filename, pred, pred_pro, gt_ellip, if_valid=False):
+    def divide_shelter_once(self, im, filename, pred, pred_pro, gt_ellip, if_valid=False, is_save=True):
         '''
         divide the shelter and not shelter
         '''
@@ -306,12 +308,21 @@ class Ellip_acc(object):
             for jj in range(sz[1]):
                 if pred[ii][jj] > 0:
                     pts.append([jj, ii])
+                    #im[ii][jj] = 255
 
         pts_ = np.array(pts)
         if pts_.shape[0] > 5:
             ellipse_info = cv2.fitEllipse(pts_)
-            pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][0], ellipse_info[1][1]])
-            ellipse_info = (tuple(np.array([ellipse_info[0][0], ellipse_info[0][1]])), tuple(np.array([ellipse_info[1][0], ellipse_info[1][1]])), 0)
+            ellipse_info_ = ellipse_info
+            #pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][0], ellipse_info[1][1]])
+            if ellipse_info[2] > 150 or ellipse_info[2] < 30:
+                angle = 180
+                pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][0], ellipse_info[1][1]])
+            else:
+                angle = 90
+                pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][1], ellipse_info[1][0]])
+
+            ellipse_info = (tuple(np.array([ellipse_info[0][0], ellipse_info[0][1]])), tuple(np.array([ellipse_info[1][0], ellipse_info[1][1]])), angle)
             loss = self.haus_loss(pred_ellip, gt_ellip)
         else:
             pred_ellip = np.array([0,0,0,0])
@@ -319,44 +330,51 @@ class Ellip_acc(object):
             loss = self.ellip_loss(pred_ellip, gt_ellip)
         
         #loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (gt_ellip[2]*gt_ellip[3]) * 1000
-        #save worse result
-        error_path = cfgs.error_path
-        im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
-        cv2.ellipse(im,ellipse_info,(0,255,0),1)
-        gt_ellip_info = (tuple(np.array([gt_ellip[0], gt_ellip[1]])), tuple(np.array([gt_ellip[2], gt_ellip[3]])), 0)
-        cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
+        if is_save:
+            fn = filename.strip().decode('utf-8')
+            fn_full = '%s%s.bmp' % ('img', fn.split('img')[1])
+            im_full = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
+            im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
 
-        fn = filename.strip().decode('utf-8')
+
+            #save worse result
+            error_path = cfgs.error_path
+            #im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
+            cv2.ellipse(im,ellipse_info,(0,255,0),1)
+            gt_ellip_info = (tuple(np.array([gt_ellip[0], gt_ellip[1]])), tuple(np.array([gt_ellip[2], gt_ellip[3]])), 0)
+            cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
+            '''
+            print('filename: ', fn, ' loss: ',  loss)
+            print('gt_ellipse_info: ', gt_ellip)
+            print('pred_ellipse_info: ', pred_ellip)
+            print('gt_ellipse_info: ', gt_ellip_info)
+            print('pred_ellipse_info: ', ellipse_info_)
+            print('gt_ellipse_info: ', gt_ellip_info)
+            print('pred_ellipse_info: ', ellipse_info)
+            '''
+            
+
        
-        if loss > cfgs.loss_thresh:
-            if loss > 500:
-                loss = 500
-            path_ = os.path.join(error_path, filename.strip().decode('utf-8')+'_'+str(int(loss))+'.bmp')
-            cv2.imwrite(path_, im)
-            '''
-            #tmp draw contours
-            contours_path_ = os.path.join(error_path, filename.strip().decode('utf-8')+'_'+str(int(loss))+'_contour.bmp')
-            cv2.imwrite(contours_path_, c_im_show)
-            '''
-        else:
-            path_ = os.path.join(error_path+'_better', filename.strip().decode('utf-8')+'_'+str(int(loss))+'.bmp')
-            cv2.imwrite(path_, im)
-            '''
-            #tmp draw contours
-            contours_path_ = os.path.join(error_path+'_better', filename.strip().decode('utf-8')+'_'+str(int(loss))+'_contour.bmp')
-            cv2.imwrite(contours_path_, c_im_show)
-            '''
+            if loss > cfgs.loss_thresh:
+                if loss > 500:
+                    loss = 500
+                path_ = os.path.join(error_path, filename.strip().decode('utf-8')+'_'+str(int(loss))+'.bmp')
+                cv2.imwrite(path_, im)
+            else:
+                path_ = os.path.join(error_path+'_better', filename.strip().decode('utf-8')+'_'+str(int(loss))+'.bmp')
+                cv2.imwrite(path_, im)
+
         return loss
 
 
 
-    def caculate_ellip_accu(self, im, filenames, pred, pred_pro, gt_ellip, if_valid=False):
+    def caculate_ellip_accu(self, im, filenames, pred, pred_pro, gt_ellip, if_valid=False, is_save=True):
         sz_ = pred.shape
         loss = 0
        
         for i in range(sz_[0]):
             #loss += caculate_ellip_accu_once(im[i], filenames[i], pred[i].astype(np.uint8), pred_pro[i], gt_ellip[i], if_valid)
-            loss += self.divide_shelter_once(im[i], filenames[i], pred[i].astype(np.uint8), pred_pro[i], gt_ellip[i], if_valid)
+            loss += self.divide_shelter_once(im[i], filenames[i], pred[i].astype(np.uint8), pred_pro[i], gt_ellip[i], if_valid, is_save)
 
         loss = loss / sz_[0]
 
