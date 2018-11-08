@@ -8,7 +8,7 @@ import os
 import cv2
 import TensorflowUtils as utils
 import G_Layers as utils_layers
-import read_data as scene_parsing
+#import read_data as scene_parsing
 import datetime
 import pdb
 #import BatchReader_multi as dataset
@@ -44,6 +44,8 @@ class Res101FCNNet(object):
         self.logs_dir = logs_dir
         self.current_itr_var = tf.Variable(0, dtype=tf.int32, name='current_itr', trainable=True)
         self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch', trainable=False)
+        self.cur_batch_size = tf.placeholder(dtype=tf.int32, name='cur_batch_size')
+
 
         self.train_records = train_records
         self.valid_records = valid_records
@@ -53,7 +55,7 @@ class Res101FCNNet(object):
         self.keep_prob = tf.placeholder(tf.float32, shape=[], name='keep_prob')
         self.input_keep_prob = tf.placeholder(tf.float32, shape=[], name='input_keep_prob')
         self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1], cfgs.seq_num+cfgs.cur_channel], name='input_image')
-        self.annotations = tf.placeholder(tf.int32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1], 1], name='annotations')
+        self.annotations = tf.placeholder(tf.int64, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1], 1], name='annotations')
 
         if self.mode == 'visualize' or 'vis_video':
             self.result_dir = cfgs.result_dir
@@ -158,6 +160,7 @@ class Res101FCNNet(object):
         self.loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
                                                                           labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
                                                                           name="entropy")))
+        self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
 
         self.pro = tf.nn.softmax(self.logits)
 
@@ -202,6 +205,61 @@ class Res101FCNNet(object):
         pdb.set_trace()
 
     #5. evaluation
+    def accuracy(self):
+        
+        #Part 1.Number of correct prediction of label 1.
+        sz = [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.int64)
+        #tensor of correct prediction label 0 and 1
+        pred_p_c = tf.where(tf.equal(self.annotations, self.pred_annotation), comp, 1-comp)
+        #tensor of correct prediction label 1
+        comp2 = comp * 2
+        pred_p1_c = tf.where(tf.equal(tf.add(self.annotations, pred_p_c), comp2), comp, 1-comp)
+        #number of correct prediction label 1
+        self.pred_p_c_num = tf.reduce_sum(pred_p1_c, name='pred_p1_num_c')
+        self.pred_p01_c_num = tf.reduce_sum(pred_p_c)
+      
+
+        #Part 2.Number of prediction label 1
+        self.pred_p_num = tf.reduce_sum(self.pred_annotation)
+
+        #Part 3.Number of label 1 in annotaions
+        self.anno_num = tf.reduce_sum(self.annotations)
+        
+        #IOU accuracy
+        self.accu_iou_tensor = (self.pred_p_c_num) / (self.pred_p_num + self.anno_num - self.pred_p_c_num) * 100
+        #pixel accuracy
+        self.accu_tensor = self.pred_p_c_num / self.anno_num * 100
+
+    def accuracy_lower(self):
+        
+        #Part 1.Number of correct prediction of label 1.
+        sz = [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.int64)
+        self.pred_anno_lower = tf.cast(self.pred_anno_lower, dtype=tf.int64)
+        #tensor of correct prediction label 0 and 1
+        pred_p_c = tf.where(tf.equal(self.annotations, self.pred_anno_lower), comp, 1-comp)
+        #tensor of correct prediction label 1
+        comp2 = comp * 2
+        pred_p1_c = tf.where(tf.equal(tf.add(self.annotations, pred_p_c), comp2), comp, 1-comp)
+        #number of correct prediction label 1
+        self.pred_p_c_num_lower = tf.reduce_sum(pred_p1_c, name='pred_p1_num_c')
+        self.pred_p01_c_num_lower = tf.reduce_sum(pred_p_c)
+      
+
+        #Part 2.Number of prediction label 1
+        self.pred_p_num_lower = tf.reduce_sum(self.pred_anno_lower)
+
+        #Part 3.Number of label 1 in annotaions
+        self.anno_num_lower = tf.reduce_sum(self.annotations)
+        
+        #IOU accuracy
+        self.accu_iou_tensor_lower = (self.pred_p_c_num_lower) / (self.pred_p_num_lower + self.anno_num_lower - self.pred_p_c_num_lower) * 100
+        #pixel accuracy
+        self.accu_tensor_lower = self.pred_p_c_num_lower / self.anno_num_lower * 100
+
+     
+        
     def calculate_acc(self, pred_anno, anno):
         with tf.name_scope('accu'):
             self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
@@ -338,12 +396,13 @@ class Res101FCNNet(object):
 
                     #3.2 train one epoch
                     step = self.train_one_epoch(sess, writer, epoch, step)
-            
+                    #step = 3080
+
                     #3.3 save model
                     self.valid_once(sess, writer, epoch, step)
                     self.cur_epoch.load(epoch, sess)
                     self.current_itr_var.load(step, sess)
-                    saver.save(sess, self.logs_dir + 'model.ckpt', step)
+                    #saver.save(sess, self.logs_dir + 'model.ckpt', step)
 
         writer.close()
 

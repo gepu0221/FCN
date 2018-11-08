@@ -304,11 +304,19 @@ class Ellip_acc(object):
 
         '''
         sz = im.shape
+        im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
+        #tmp
+        
+        fn = filename.strip().decode('utf-8')
+        fn_full = '%s%s.bmp' % ('img', fn.split('img')[1])
+        im_full = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
+        im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
+        
         for ii in range(sz[0]):
             for jj in range(sz[1]):
                 if pred[ii][jj] > 0:
                     pts.append([jj, ii])
-                    #im[ii][jj] = 255
+                    im[ii][jj] = 255
 
         pts_ = np.array(pts)
         if pts_.shape[0] > 5:
@@ -331,11 +339,12 @@ class Ellip_acc(object):
         
         #loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (gt_ellip[2]*gt_ellip[3]) * 1000
         if is_save:
+            '''
             fn = filename.strip().decode('utf-8')
             fn_full = '%s%s.bmp' % ('img', fn.split('img')[1])
             im_full = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
             im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
-
+            '''
 
             #save worse result
             error_path = cfgs.error_path

@@ -22,9 +22,9 @@ import shutil
 from train_resnet_parent import Res101FCNNet as FCNNet
 
 try:
-    from .cfgs.config_train_resnet_fgG import cfgs
+    from .cfgs.config_train_resnet import cfgs
 except Exception:
-    from cfgs.config_train_resnet_fgG import cfgs
+    from cfgs.config_train_resnet import cfgs
 
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
@@ -360,7 +360,7 @@ class SeqFCNNet(FCNNet):
         sum_acc_ellip = 0
         t0 = time.time()
         
-        if_epoch = True
+        if_epoch = cfgs.test_accu
         if epoch % 5 == 0:
             if_epoch = True
 
@@ -433,7 +433,7 @@ class SeqFCNNet(FCNNet):
         mean_acc_iou = 0
         mean_acc_ellip = 0
 
-        if_epoch = True
+        if_epoch = cfgs.test_accu
         if epoch % 5 == 0:
             if_epoch = True
 
@@ -453,6 +453,8 @@ class SeqFCNNet(FCNNet):
                     coord_map_x_cur, coord_map_y_cur = self.coord_map_x, self.coord_map_y
                 else:
                     coord_map_x_cur, coord_map_y_cur = self.generate_coord_map(cur_batch_size)
+                
+                
                 
                 if cur_batch_size == cfgs.batch_size:
                     

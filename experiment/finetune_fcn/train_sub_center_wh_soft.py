@@ -7,11 +7,10 @@ import math
 import os
 import cv2
 import TensorflowUtils as utils
-#import read_data_finegrain as scene_parsing_fg
 import read_data as scene_parsing
 import datetime
 import pdb
-from BatchReader_multi_ellip import *
+from BatchReader_multi_ellip_soft import *
 import CaculateAccurary as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
@@ -22,12 +21,9 @@ import shutil
 from train_resnet_parent import Res101FCNNet as FCNNet
 
 try:
-    #from .cfgs.config_train_resnet_fg import cfgs
     from .cfgs.config_train_resnet import cfgs
 except Exception:
-    #from cfgs.config_train_resnet_fg import cfgs
     from cfgs.config_train_resnet import cfgs
-
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
@@ -46,6 +42,9 @@ class SeqFCNNet(FCNNet):
         self.channel = self.cur_channel + self.seq_num
         self.inference_name = 'inference'
         self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1], cfgs.seq_num+self.cur_channel], name='input_image')
+        self.annotations = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1], 2], name='annotations')
+
+
         self.create_view_path()
         self.coord_map_x, self.coord_map_y = self.generate_coord_map(self.batch_size)
         self.coord_x_tensor = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1]], name='coord_x_map_tensor')
@@ -151,26 +150,21 @@ class SeqFCNNet(FCNNet):
         self.pro = tf.nn.softmax(self.logits)
         self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
         
-        self.center_wh_range_global_loss()
-        self.loss = (1-cfgs.center_w-cfgs.dis_w) * tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
-                                                                                        labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
-                                                                                        name='entropy_loss'))) + cfgs.center_w * self.center_loss + cfgs.dis_w * self.wh_loss
-        #self.loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
-        #                                                                               labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
-        #                                                                               name='entropy_loss'))) * cfgs.center_w * self.center_loss
-        #self.loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
+        #self.center_wh_range_global_loss()
+        #self.loss = (1-cfgs.center_w-cfgs.dis_w) * tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
         #                                                                                labels=tf.squeeze(self.annotations, squeeze_dims=[3]),
-        #                                                                                name='entropy_loss'))) 
+        #                                                                                name='entropy_loss'))) + cfgs.center_w * self.center_loss + cfgs.dis_w * self.wh_loss
+        
+        soft_logits = self.logits / cfgs.temperature
+        self.loss = tf.reduce_mean((tf.nn.softmax_cross_entropy_with_logits(logits=soft_logits,
+                                                                            labels=self.annotations,
+                                                                            name="entropy")))
 
         
         sz = [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
         im_comp = tf.ones(sz, dtype=tf.int32)
         self.pred_anno_lower = tf.expand_dims(tf.where(tf.less_equal(self.pro[:, :, :, 1], cfgs.low_pro), 1-im_comp, im_comp), dim=3)
         
-    def generate_mask_im(self):
-        
-        self.mask_ims = tf.multiply(tf.cast(self.pred_anno_lower, dtype=tf.float32), self.images)
-    
     #3. accuracy
     def calculate_acc(self, im, filenames, pred_anno, pred_pro, anno, gt_ellip_info, if_valid=False, if_epoch=True):
         with tf.name_scope('ellip_accu'):
@@ -187,15 +181,42 @@ class SeqFCNNet(FCNNet):
                 #self.accu = 0
                 self.ellip_acc = 0
     
+    #Accuracy for soft labels.
+    def accuracy_lower(self):
+        
+        #Part 1.Number of correct prediction of label 1.
+        sz = [self.cur_batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.int64)
+        self.pred_anno_lower = tf.cast(self.pred_anno_lower, dtype=tf.int64)
+        #tensor of correct prediction label 0 and 1
+        pred_p_c = tf.where(tf.equal(self.annotations, self.pred_anno_lower), comp, 1-comp)
+        #tensor of correct prediction label 1
+        comp2 = comp * 2
+        pred_p1_c = tf.where(tf.equal(tf.add(self.annotations, pred_p_c), comp2), comp, 1-comp)
+        #number of correct prediction label 1
+        self.pred_p_c_num_lower = tf.reduce_sum(pred_p1_c, name='pred_p1_num_c')
+        self.pred_p01_c_num_lower = tf.reduce_sum(pred_p_c)
+      
+
+        #Part 2.Number of prediction label 1
+        self.pred_p_num_lower = tf.reduce_sum(self.pred_anno_lower)
+
+        #Part 3.Number of label 1 in annotaions
+        self.anno_num_lower = tf.reduce_sum(self.annotations)
+        
+        #IOU accuracy
+        self.accu_iou_tensor_lower = (self.pred_p_c_num_lower) / (self.pred_p_num_lower + self.anno_num_lower - self.pred_p_c_num_lower) * 100
+        #pixel accuracy
+        self.accu_tensor_lower = self.pred_p_c_num_lower / self.anno_num_lower * 100
+
+     
     #5. build graph
-    
     def build(self):
         
         self.get_data_cache()
         self.loss()
-        self.generate_mask_im()
-        self.accuracy()
-        self.accuracy_lower()
+        #self.accuracy()
+        #self.accuracy_lower()
         self.train_optimizer()
         self.summary()
 
@@ -276,60 +297,7 @@ class SeqFCNNet(FCNNet):
                 self.view_one_valid(fns[i], pred_annos[i], pred_pros[i], ims[i], step)   
 
 
-    #generate image mask
-    def im_mask_view_one(self, fn, pred_anno, pred_pro, im, step):
-        path_ = os.path.join(cfgs.view_path, 'train')
-        
-        if cfgs.test_view:
-            filename = fn.strip().decode('utf-8')
-        else:
-            filename = str(step)+'_'+fn.strip().decode('utf-8')
-
-        pred_anno_im = cv2.cvtColor((pred_anno).astype(np.uint8), cv2.COLOR_RGB2BGR)
-        cv2.imwrite(os.path.join(path_, filename+'.bmp'), pred_anno_im)
-        #cv2.imwrite(os.path.join(path_, filename+'_im.bmp'), im[:,:,0])
-        #heatmap = density_heatmap(pred_pro[:,:,1])
-        #cv2.imwrite(os.path.join(path_, filename+'_heat.bmp'), heatmap)
-        if cfgs.view_seq:
-            for i in range(cfgs.seq_num):
-                im_ = im[:,:,self.cur_channel-1+i]
-                cv2.imwrite(os.path.join(path_, filename+'seq_'+str(i+1)+'.bmp'), im_)
-            
-    def im_mask_view(self, fns, pred_annos, pred_pros, ims, step):
-        num_ = fns.shape[0]
-        if cfgs.random_view:
-            choosen = random.randint(0, num_-1)
-            self.im_mask_view_one(fns[choosen], pred_annos[choosen], pred_pros[choosen], ims[choosen], step)
-        else:
-            for i in range(num_):
-                self.im_mask_view_one(fns[i], pred_annos[i], pred_pros[i], ims[i], step)   
-
-    def im_mask_view_one_valid(self, fn, pred_anno, pred_pro, im, step):
-        path_ = os.path.join(cfgs.view_path, 'valid')
-        if cfgs.test_view:
-            filename = fn.strip().decode('utf-8')
-        else:
-            filename = str(step)+'_'+fn.strip().decode('utf-8')
-        
-        pred_anno_im = cv2.cvtColor((pred_anno).astype(np.uint8), cv2.COLOR_RGB2BGR)
-        cv2.imwrite(os.path.join(path_, filename+'.bmp'), pred_anno_im)
-        #cv2.imwrite(os.path.join(path_, filename+'_im.bmp'), im[:,:,0])
-        #heatmap = density_heatmap(pred_pro[:,:,1])
-        #cv2.imwrite(os.path.join(path_, filename+'_heat.bmp'), heatmap)
-        if cfgs.view_seq:
-            for i in range(cfgs.seq_num):
-                im_ = im[:,:,self.cur_channel-1+i]
-                cv2.imwrite(os.path.join(path_, filename+'seq_'+str(i+1)+'.bmp'), im_)
-            
-    def im_mask_view_valid(self, fns, pred_annos, pred_pros, ims, step):
-        num_ = fns.shape[0]
-        if cfgs.random_view:
-            choosen = random.randint(0, num_-1)
-            self.im_mask_view_one_valid(fns[choosen], pred_annos[choosen], pred_pros[choosen], ims[choosen], step)
-        else:
-            for i in range(num_):
-                self.im_mask_view_one_valid(fns[i], pred_annos[i], pred_pros[i], ims[i], step)   
-
+                        
 
     #Evaluate all validation dataset once 
     def valid_once(self, sess, writer, epoch, step):
@@ -340,7 +308,7 @@ class SeqFCNNet(FCNNet):
         sum_acc_ellip = 0
         t0 = time.time()
         
-        if_epoch = False
+        if_epoch = cfgs.test_accu
         if epoch % 5 == 0:
             if_epoch = True
 
@@ -363,10 +331,12 @@ class SeqFCNNet(FCNNet):
                     ellip_info_high = np.max(ellip_infos_[:, 2:], 1) / 2
                     ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
 
-                    pred_anno, pred_seq_pro, summary_str = sess.run(
+                    #pred_anno, pred_seq_pro, summary_str, loss, self.accu, self.accu_iou = sess.run(
                     #fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
                     #fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
-                    fetches=[self.mask_ims, self.pro, self.summary_op],
+                    pred_anno, pred_seq_pro, summary_str, loss = sess.run(
+                    fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss],
+
                     feed_dict={self.images: images_, 
                                self.annotations: annos_, self.lr: self.learning_rate,
                                self.keep_prob: 1,
@@ -374,18 +344,16 @@ class SeqFCNNet(FCNNet):
                                self.cur_batch_size: cur_batch_size,
                                self.coord_x_tensor: coord_map_x_cur,
                                self.coord_y_tensor: coord_map_y_cur,
+
+                               #self.ellip_low: ellip_info_low,
+                               #self.ellip_high: ellip_info_high
                                self.ellip_axis: ellip_info_mean})
                 
                     #View result
-                    #self.view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
-                    self.im_mask_view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
-
+                    self.view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
 
                     writer.add_summary(summary_str, global_step=step)
                     self.calculate_acc(cur_ims.copy(), filenames, pred_anno, pred_seq_pro, annos_, ellip_infos_, True, if_epoch)
-                    self.accu = 0
-                    self.accu_iou = 0
-                    loss = 0
                     sum_acc += self.accu
                     sum_acc_iou += self.accu_iou
                     sum_acc_ellip += self.ellip_acc
@@ -416,7 +384,7 @@ class SeqFCNNet(FCNNet):
         mean_acc_iou = 0
         mean_acc_ellip = 0
 
-        if_epoch = False
+        if_epoch = cfgs.test_accu
         if epoch % 5 == 0:
             if_epoch = True
 
@@ -429,7 +397,7 @@ class SeqFCNNet(FCNNet):
                 #1. train
                 images_, cur_ims_, ellip_infos_, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames])
                 
-                #cv2.imwrite('%s_anno.bmp' % filenames[0], annos_[0]*255)
+                #cv2.imwrite('%s_anno1.bmp' % filenames[0], annos_[0,:, :, 1]*255)
                 #pdb.set_trace()
                 cur_batch_size = images_.shape[0]
                 if cur_batch_size == cfgs.batch_size:
@@ -443,10 +411,12 @@ class SeqFCNNet(FCNNet):
                     ellip_info_high = np.max(ellip_infos_[:, 2:], 1) / 2
                     ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
 
-                    #generate mask ims
-                    pred_anno_, pred_seq_pro_, summary_str = sess.run([self.mask_ims, self.pro, self.summary_op],
- 
+                    #pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
+                    #pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor_lower, self.accu_iou_tensor_lower],
+                    pred_anno_, pred_seq_pro_, summary_str, loss, _  = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.train_op],
 
+                    #pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss self.accu_tensor_lower, self.accu_iou_tensor_lower],
+ 
                                                                     feed_dict={self.images: images_, 
                                                                              self.annotations: annos_, self.lr: self.learning_rate,
                                                                              self.keep_prob: 1,
@@ -459,15 +429,13 @@ class SeqFCNNet(FCNNet):
                                                                              #self.ellip_high: ellip_info_high,
                                                                              self.ellip_axis: ellip_info_mean})
                     
-
-                    self.im_mask_view(filenames, pred_anno_, pred_seq_pro_, images_, step)
-
+                   
+                    self.view(filenames, pred_anno_, pred_seq_pro_, images_, step)
                     #2. calculate accurary
                     
                     self.calculate_acc(cur_ims_.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
                     self.accu = 0
                     self.accu_iou = 0
-                    loss = 0
                     sum_acc += self.accu
                     sum_acc_iou += self.accu_iou
                     sum_acc_ellip += self.ellip_acc
@@ -506,16 +474,15 @@ class SeqFCNNet(FCNNet):
      
         return step
 
-    
+
+
     #------------------------------------------------------------------------------
 
 #Main function
 def main():
  
     with tf.device('/gpu:0'):
-        #train_records, valid_records = scene_parsing_fg.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
         train_records, valid_records = scene_parsing.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
-
         print('The number of train records is %d and valid records is %d.' % (len(train_records), len(valid_records)))
         model = SeqFCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob, cfgs.logs_dir)
         model.build()

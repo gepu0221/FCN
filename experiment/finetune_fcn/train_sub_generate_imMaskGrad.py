@@ -23,10 +23,10 @@ from train_resnet_parent import Res101FCNNet as FCNNet
 
 try:
     #from .cfgs.config_train_resnet_fg import cfgs
-    from .cfgs.config_train_resnet_mg import cfgs
+    from .cfgs.config_train_resnet import cfgs
 except Exception:
     #from cfgs.config_train_resnet_fg import cfgs
-    from cfgs.config_train_resnet_mg import cfgs
+    from cfgs.config_train_resnet import cfgs
 
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
@@ -411,7 +411,7 @@ class SeqFCNNet(FCNNet):
                 #fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
                 fetches=[self.mask_grad_ims, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
                 feed_dict={self.images: images_, 
-                           self.grad_ims:grad_ims_,
+                           self.grad_ims: grad_ims_,
                            self.annotations: annos_, self.lr: self.learning_rate,
                            self.keep_prob: 1,
                            self.input_keep_prob: 1,

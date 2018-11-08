@@ -5,9 +5,9 @@ from six.moves import cPickle as pickle
 import random
 
 try:
-    from .cfgs.config_train_resnet import cfgs 
+    from .cfgs.config_train_resnet_fg import cfgs 
 except Exception:
-    from cfgs.config_train_resnet import cfgs
+    from cfgs.config_train_resnet_fg import cfgs
 
 
 ratio = [cfgs.IMAGE_SIZE[0]/1080, cfgs.IMAGE_SIZE[1]/1920]
@@ -97,19 +97,18 @@ def read_txt_data(folder_dir, anno_folder):
             line = line.split('*')
 
             seq_set = []
-            #1. get path of current frame
-            line_cur_s = line[1].split(' ')
+            #1. get path of sequence, if not sequence, seq_num=0
+            for i in range(1, cfgs.seq_num+1):
+                seq_set.append(line[i].split(' ')[0])
+            #2. get path of current frame
+            line_cur_s = line[cfgs.seq_num+1].split(' ')
             cur_frame = line_cur_s[0]
             cur_frame_s = cur_frame.split("/")
-            #2. get filename
+            #3. get filename
             filename = '%s%s' % (cur_frame_s[len(cur_frame_s)-3], os.path.splitext(cur_frame_s[-1])[0])
             cur_filename = '%s%s' % (cur_frame_s[len(cur_frame_s)-3], os.path.splitext(cur_frame_s[-1])[0])
-            
-            #cur_filename = '%s' % (os.path.splitext(cur_frame_s[-1])[0])
 
-            #3. get path of sequence, if not sequence, seq_num=0
-            grad_seq_frame = os.path.join(cfgs.grad_im_folder, filename+'.bmp')
-            seq_set.append(grad_seq_frame)
+            #cur_filename = '%s' % (os.path.splitext(cur_frame_s[-1])[0])
 
             if 's7' in filename or 's3' in filename or 'simg' in filename:
                 ellip_info = _rect_s7(line_cur_s)
