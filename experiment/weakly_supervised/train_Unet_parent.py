@@ -132,6 +132,7 @@ class U_Net(object):
     def train_optimizer(self):
         optimizer = tf.train.AdamOptimizer(self.lr)
         var_list = tf.trainable_variables()
+        self.var_list = var_list
         #import pprint
         #pprint.pprint(var_list)
         #pdb.set_trace()
@@ -242,9 +243,75 @@ class U_Net(object):
         self.accu_iou_tensor_lower = (self.pred_p_c_num_lower) / (self.pred_p_num_lower + self.anno_num_lower - self.pred_p_c_num_lower) * 100
         #pixel accuracy
         self.accu_tensor_lower = self.pred_p_c_num_lower / self.anno_num_lower * 100
-
-     
+    
+    #accuracy for label2
+    def acc_label2(self):
+        '''
+        Only caculate accuracy for label 2, the cornea.
+        label 0: background
+        label 1: instrument
+        label 2: cornea
+        '''
         
+        #Part 1.Number of correct prediction of label 1.
+        sz = [self.cur_batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.int64)
+        #tensor of correct prediction label 2
+        comp4 = comp * 4
+        self.add4 = tf.add(self.annotations, self.pred_annotation)
+        pred_p2_c = tf.where(tf.equal(tf.add(self.annotations, self.pred_annotation), comp4), comp, 1-comp)
+        self.pred_p2_c = pred_p2_c
+        #Numner of correct prediction of label 2
+        self.pred_p2_c_num = tf.reduce_sum(pred_p2_c, name='pred_p2_num_c')
+
+
+        #Part 2:Number of prediction of label 2
+        comp2 = comp * 2
+        pred_p2 = tf.where(tf.equal(self.pred_annotation, comp2), comp, 1-comp)
+        self.pred_p2_num = tf.reduce_sum(pred_p2)
+
+        #Part 3:Number of annotation of label2
+        anno_p2 = tf.where(tf.equal(self.annotations, comp2), comp, 1-comp)
+        self.anno2_num = tf.reduce_sum(anno_p2)
+
+        #IOU accuracy
+        self.accu_iou_tensor = (self.pred_p2_c_num) / (self.pred_p2_num + self.anno2_num - self.pred_p2_c_num) * 100
+        #pixel accuracy
+        self.accu_tensor = self.pred_p2_c_num / self.anno2_num * 100
+
+    def acc_label2_lower(self):
+        '''
+        Only caculate accuracy for label 2, the cornea.
+        label 0: background
+        label 1: instrument
+        label 2: cornea
+        '''
+        
+        #Part 1.Number of correct prediction of label 1.
+        sz = [self.cur_batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.int64)
+        self.pred_anno_lower = tf.cast(self.pred_anno_lower, dtype=tf.int64)
+        #tensor of correct prediction label 2
+        comp4 = comp * 4
+        pred_p2_c = tf.where(tf.equal(tf.add(self.annotations, self.pred_anno_lower), comp4), comp, 1-comp)
+        #Numner of correct prediction of label 2
+        self.pred_p2_c_num_lower = tf.reduce_sum(pred_p2_c, name='pred_p2_num_c')
+
+
+        #Part 2:Number of prediction of label 2
+        comp2 = comp * 2
+        pred_p2 = tf.where(tf.equal(self.pred_anno_lower, comp2), comp, 1-comp)
+        self.pred_p2_num_lower = tf.reduce_sum(pred_p2)
+
+        #Part 3:Number of annotation of label2
+        anno_p2 = tf.where(tf.equal(self.annotations, comp2), comp, 1-comp)
+        self.anno2_num_lower = tf.reduce_sum(anno_p2)
+
+        #IOU accuracy
+        self.accu_iou_tensor_lower = (self.pred_p2_c_num_lower) / (self.pred_p2_num_lower + self.anno2_num_lower - self.pred_p2_c_num_lower) * 100
+        #pixel accuracy
+        self.accu_tensor_lower = self.pred_p2_c_num_lower / self.anno2_num_lower * 100
+
     def calculate_acc(self, pred_anno, anno):
         with tf.name_scope('accu'):
             self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
@@ -380,7 +447,7 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    #step = self.train_one_epoch(sess, writer, epoch, step)
+                    step = self.train_one_epoch(sess, writer, epoch, step)
 
                     #3.3 save model
                     self.valid_once(sess, writer, epoch, step)
