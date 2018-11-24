@@ -62,6 +62,7 @@ class SeqFCNNet(FCNNet):
     def get_data_cache(self):
         with tf.device('/cpu:0'):
             self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations,self.train_labels,  self.train_filenames = get_data_cache(self.train_records, self.batch_size, False, 'get_data_train')
+            pdb.set_trace()
             self.valid_images, self.valid_cur_ims, self.valid_ellip_infos, self.valid_annotations, self.valid_labels, self.valid_filenames = get_data_cache(self.valid_records, self.batch_size, False, 'get_data_valid_mask')
 
 
@@ -179,6 +180,7 @@ class SeqFCNNet(FCNNet):
         '''
         
         self.mask_ims_lower = tf.multiply(tf.cast(self.pred_anno_lower, dtype=tf.float32), self.images[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :])
+        #self.mask_ims_lower = tf.cast(self.pred_anno_lower, dtype=tf.float32)
         sz = [self.batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
         comp = tf.ones(sz, dtype=tf.int64)
         #Instrument mask filter
@@ -191,6 +193,32 @@ class SeqFCNNet(FCNNet):
         self.mask_ims = tf.multiply(self.mask_ims_lower, self.inst_mask)
         #self.mask_ims = self.mask_ims_lower
     
+    def generate_mask_im_filter_occ_show(self):
+        
+        '''
+        show the result with white 
+        of generating image mask after Net1 using a lower probility.
+        Filter occlusion part which is labeled with 2.
+        '''
+        
+        #self.mask_ims_lower = tf.multiply(tf.cast(self.pred_anno_lower, dtype=tf.float32), self.images[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :])
+        self.mask_ims_lower = tf.cast(self.pred_anno_lower, dtype=tf.float32)
+        sz = [self.batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.int64)
+        #Instrument mask filter
+        sz = [cfgs.batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1]]
+        im_comp = tf.ones(sz, dtype=tf.int64)
+        self.pred_inst_lower = tf.expand_dims(tf.where(tf.less_equal(self.pro[:, :, :, 1], cfgs.inst_low_pro), 1-im_comp, im_comp), dim=3)
+
+        self.inst_mask = tf.cast(tf.where(tf.equal(self.pred_inst_lower, comp), 1-comp, comp), tf.float32)
+
+        self.mask_ims = tf.multiply(self.mask_ims_lower, self.inst_mask)
+        self.mask_ims = tf.concat([self.mask_ims, self.mask_ims, self.mask_ims], axis=3)
+        sz3 = [cfgs.batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 3]
+        comp3 = tf.ones(sz3, dtype=tf.float32)
+
+        self.mask_ims = tf.where(tf.less_equal(self.mask_ims, 0), self.images[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], comp3)
+
     #3. accuracy
     def calculate_acc(self, im, filenames, pred_anno, pred_pro, anno, gt_ellip_info, if_valid=False, if_epoch=True):
         with tf.name_scope('ellip_accu'):
@@ -212,8 +240,10 @@ class SeqFCNNet(FCNNet):
     def build(self):
         
         self.get_data_cache()
+        pdb.set_trace()
         self.loss()
-        self.generate_mask_im_filter_occ()
+        #self.generate_mask_im_filter_occ()
+        self.generate_mask_im_filter_occ_show()
         self.accuracy()
         self.accuracy_lower()
         self.train_optimizer()
@@ -402,7 +432,7 @@ class SeqFCNNet(FCNNet):
 
 
                     writer.add_summary(summary_str, global_step=step)
-                    self.calculate_acc(cur_ims.copy(), filenames, pred_anno, pred_seq_pro, annos_, ellip_infos_, True, if_epoch)
+                    #self.calculate_acc(cur_ims.copy(), filenames, pred_anno, pred_seq_pro, annos_, ellip_infos_, True, if_epoch)
                     self.accu = 0
                     self.accu_iou = 0
                     loss = 0
@@ -423,110 +453,7 @@ class SeqFCNNet(FCNNet):
         except tf.errors.OutOfRangeError:
             print('Error!')
         
-        
-    def train_one_epoch(self, sess, writer, epoch, step):
-        print('sub_train_one_epoch')
-        sum_acc = 0
-        sum_acc_iou = 0
-        sum_acc_ellip = 0
-        count = 0
-        total_loss = 0
-        t0 =time.time()
-        mean_acc = 0
-        mean_acc_iou = 0
-        mean_acc_ellip = 0
-
-        if_epoch = False
-        if epoch % 5 == 0:
-            if_epoch = True
-
-        try:
-            #self.per_e_train_batch = 2
-            while count<self.per_e_train_batch:
-                step += 1
-                count += 1
-                
-                #1. train
-                images_, cur_ims_, ellip_infos_, annos_, filenames = sess.run([self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations, self.train_filenames])
-                
-                #cv2.imwrite('%s_anno.bmp' % filenames[0], annos_[0]*255)
-                #pdb.set_trace()
-                cur_batch_size = images_.shape[0]
-                if cur_batch_size == cfgs.batch_size:
-                    coord_map_x_cur, coord_map_y_cur = self.coord_map_x, self.coord_map_y
-                else:
-                    coord_map_x_cur, coord_map_y_cur = self.generate_coord_map(cur_batch_size)
-                
-                if cur_batch_size == cfgs.batch_size:
-                    
-                    ellip_info_low = np.min(ellip_infos_[:, 2:], 1) / 2
-                    ellip_info_high = np.max(ellip_infos_[:, 2:], 1) / 2
-                    ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
-
-                    #generate mask ims
-                    pred_anno_, pred_seq_pro_, summary_str = sess.run([self.mask_ims, self.pro, self.summary_op],
- 
-
-                                                                    feed_dict={self.images: images_, 
-                                                                             self.annotations: annos_, self.lr: self.learning_rate,
-                                                                             self.class_labels: labels,
-
-                                                                             self.keep_prob: 1,
-                                                                             self.input_keep_prob: 1,
-                                                                             self.cur_batch_size: cur_batch_size,
-                                                                             self.coord_x_tensor: coord_map_x_cur,
-                                                                             self.coord_y_tensor: coord_map_y_cur,
-
-                                                                             #self.ellip_low: ellip_info_low,
-                                                                             #self.ellip_high: ellip_info_high,
-                                                                             self.ellip_axis: ellip_info_mean})
-                    
-
-                    self.im_mask_view(filenames, pred_anno_, pred_seq_pro_, images_, step)
-
-                    #2. calculate accurary
-                    
-                    self.calculate_acc(cur_ims_.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
-                    self.accu = 0
-                    self.accu_iou = 0
-                    loss = 0
-                    sum_acc += self.accu
-                    sum_acc_iou += self.accu_iou
-                    sum_acc_ellip += self.ellip_acc
-                    mean_acc = sum_acc/count
-                    mean_acc_iou = sum_acc_iou/count
-                    mean_acc_ellip = sum_acc_ellip/count
-                    #3. calculate loss
-                    total_loss += loss
-                    
-                    #4. time consume
-                    time_consumed = time.time() - t0
-                    time_per_batch = time_consumed/count
-
-                    #5. check if change learning rate
-                    if count % 100 == 0:
-                        self.try_update_lr()
-                    #6. summary
-                    writer.add_summary(summary_str, global_step=step)
-
-                    #6. print
-                    #print('\r' + 2 * ' ', end='')
-                    #print('center_loss: %g' % loss_center)
-                    #print('wh_loss: %g' % loss_wh)
-                    print('epoch %5d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t mean_loss=%.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f\t time = %.2f' % (epoch, self.learning_rate, step, count, loss, (total_loss/count), mean_acc, mean_acc_iou, mean_acc_ellip, time_per_batch))
-            
-            #End one epoch
-            #count -= 1
-            print('epoch %5d\t learning_rate = %g\t mean_loss = %.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
-            print('Take time %3.1f' % (time.time() - t0))
-
-        except tf.errors.OutOfRangeError:
-            print('Error!')
-            count -= 1
-            print('epoch %5d\t learning_rate = %g\t mean_loss = %.3f\t train_accuracy = %.2f%%\t train_iou_accuracy = %.2f%%' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count)))
-            print('Take time %3.1f' % (time.time() - t0))
      
-        return step
 
     def train_one_epoch(self, sess, writer, epoch, step):
         print('sub_train_one_epoch')
@@ -610,11 +537,12 @@ class SeqFCNNet(FCNNet):
                 self.im_mask_view(filenames, pred_anno_, pred_seq_pro_, images_, step)
 
                 #2. calculate accurary
-                self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :].copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                #self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :].copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
                 self.accu = 0
                 self.accu_iou = 0
                 loss = 0
                 self.acc_label_ = 0
+                self.ellip_acc = 0
 
                 sum_acc += self.accu
                 sum_acc_iou += self.accu_iou
