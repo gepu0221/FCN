@@ -7,12 +7,12 @@ import math
 import os
 import cv2
 import TensorflowUtils as utils
-import G_Layers as utils_layers
+import G_Layers_fg as utils_layers
 #import read_data as scene_parsing
 import datetime
 import pdb
 #import BatchReader_multi as dataset
-from BatchReader_multi_ellip import get_data_cache
+from BatchReader_multi_ellip_noLabel import get_data_cache
 import CaculateAccurary as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
@@ -54,7 +54,6 @@ class U_Net(object):
         self.keep_prob = tf.placeholder(tf.float32, shape=[], name='keep_prob')
         self.input_keep_prob = tf.placeholder(tf.float32, shape=[], name='input_keep_prob')
         self.images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1], cfgs.seq_num+cfgs.cur_channel], name='input_image')
-        self.class_labels = tf.placeholder(tf.int32, shape=[None], name='class_occlusion_label')
         self.annotations = tf.placeholder(tf.int64, shape=[None, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1], name='annotations')
 
         if self.mode == 'visualize' or 'vis_video':
@@ -109,12 +108,11 @@ class U_Net(object):
         with tf.variable_scope(inference_name):
             
             #U-Net
-            logits, class_logits = self.u_net.u_net_op(x=processed_images, 
+            logits = self.u_net.u_net_op(x=processed_images, 
                                          keep_prob_=keep_prob, 
                                          channels=channel,
                                          n_class = cfgs.n_class,
                                          layers = cfgs.layers,
-                                         class_convs_num = cfgs.class_convs_num,
                                          features_root=cfgs.features_root,
                                          filter_size = cfgs.filter_size,
                                          pool_size = cfgs.pool_size)
@@ -122,17 +120,16 @@ class U_Net(object):
             annotation_pred = tf.argmax(logits, dimension=3, name="prediction")
             print('logits shape', logits.shape)
 
-        return logits, class_logits
+        return logits
      
 
     def infer(self):
-        self.logits, self.class_logits = self.inference(self.images, 'inference_name', 7, self.keep_prob )
+        self.logits = self.inference(self.images, 'inference_name', 7, self.keep_prob )
 
         #3. optmizer
     def train_optimizer(self):
         optimizer = tf.train.AdamOptimizer(self.lr)
         var_list = tf.trainable_variables()
-        self.var_list = var_list
         #import pprint
         #pprint.pprint(var_list)
         #pdb.set_trace()
@@ -243,85 +240,19 @@ class U_Net(object):
         self.accu_iou_tensor_lower = (self.pred_p_c_num_lower) / (self.pred_p_num_lower + self.anno_num_lower - self.pred_p_c_num_lower) * 100
         #pixel accuracy
         self.accu_tensor_lower = self.pred_p_c_num_lower / self.anno_num_lower * 100
-    
-    #accuracy for label2
-    def acc_label2(self):
-        '''
-        Only caculate accuracy for label 2, the cornea.
-        label 0: background
-        label 1: instrument
-        label 2: cornea
-        '''
+
+     
         
-        #Part 1.Number of correct prediction of label 1.
-        sz = [self.cur_batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
-        comp = tf.ones(sz, dtype=tf.int64)
-        #tensor of correct prediction label 2
-        comp4 = comp * 4
-        self.add4 = tf.add(self.annotations, self.pred_annotation)
-        pred_p2_c = tf.where(tf.equal(tf.add(self.annotations, self.pred_annotation), comp4), comp, 1-comp)
-        self.pred_p2_c = pred_p2_c
-        #Numner of correct prediction of label 2
-        self.pred_p2_c_num = tf.reduce_sum(pred_p2_c, name='pred_p2_num_c')
-
-
-        #Part 2:Number of prediction of label 2
-        comp2 = comp * 2
-        pred_p2 = tf.where(tf.equal(self.pred_annotation, comp2), comp, 1-comp)
-        self.pred_p2_num = tf.reduce_sum(pred_p2)
-
-        #Part 3:Number of annotation of label2
-        anno_p2 = tf.where(tf.equal(self.annotations, comp2), comp, 1-comp)
-        self.anno2_num = tf.reduce_sum(anno_p2)
-
-        #IOU accuracy
-        self.accu_iou_tensor = (self.pred_p2_c_num) / (self.pred_p2_num + self.anno2_num - self.pred_p2_c_num) * 100
-        #pixel accuracy
-        self.accu_tensor = self.pred_p2_c_num / self.anno2_num * 100
-
-    def acc_label2_lower(self):
-        '''
-        Only caculate accuracy for label 2, the cornea.
-        label 0: background
-        label 1: instrument
-        label 2: cornea
-        '''
-        
-        #Part 1.Number of correct prediction of label 1.
-        sz = [self.cur_batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
-        comp = tf.ones(sz, dtype=tf.int64)
-        self.pred_anno_lower = tf.cast(self.pred_anno_lower, dtype=tf.int64)
-        #tensor of correct prediction label 2
-        comp4 = comp * 4
-        pred_p2_c = tf.where(tf.equal(tf.add(self.annotations, self.pred_anno_lower), comp4), comp, 1-comp)
-        #Numner of correct prediction of label 2
-        self.pred_p2_c_num_lower = tf.reduce_sum(pred_p2_c, name='pred_p2_num_c')
-
-
-        #Part 2:Number of prediction of label 2
-        comp2 = comp * 2
-        pred_p2 = tf.where(tf.equal(self.pred_anno_lower, comp2), comp, 1-comp)
-        self.pred_p2_num_lower = tf.reduce_sum(pred_p2)
-
-        #Part 3:Number of annotation of label2
-        anno_p2 = tf.where(tf.equal(self.annotations, comp2), comp, 1-comp)
-        self.anno2_num_lower = tf.reduce_sum(anno_p2)
-
-        #IOU accuracy
-        self.accu_iou_tensor_lower = (self.pred_p2_c_num_lower) / (self.pred_p2_num_lower + self.anno2_num_lower - self.pred_p2_c_num_lower) * 100
-        #pixel accuracy
-        self.accu_tensor_lower = self.pred_p2_c_num_lower / self.anno2_num_lower * 100
-
     def calculate_acc(self, pred_anno, anno):
         with tf.name_scope('accu'):
             self.accu_iou, self.accu = accu.caculate_accurary(pred_anno, anno)
     
-    #eval_class_label
+    #not use
     def eval(self):
         with tf.name_scope('eval'):
-            is_correct = tf.equal(tf.squeeze(tf.cast(self.pred_label, tf.int32), axis=1), self.class_labels)
+            is_correct = tf.equal(tf.cast(self.pred_annotation, tf.int32), self.annotations)
             sum_ = tf.cast(tf.reduce_sum(tf.cast(is_correct, tf.int32)), tf.float32)
-            self.acc_label = tf.multiply(sum_, 100/(self.batch_size))
+            self.acc = tf.multiply(sum_, 100/(self.IMAGE_SIZE*self.IMAGE_SIZE*self.batch_size))
 
     #7. summary
     def summary(self):
@@ -447,13 +378,13 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    #step = self.train_one_epoch(sess, writer, epoch, step)
+                    step = self.train_one_epoch(sess, writer, epoch, step)
 
                     #3.3 save model
                     self.valid_once(sess, writer, epoch, step)
                     self.cur_epoch.load(epoch, sess)
                     self.current_itr_var.load(step, sess)
-                    #saver.save(sess, self.logs_dir + 'model.ckpt', step)
+                    saver.save(sess, self.logs_dir + 'model.ckpt', step)
 
         writer.close()
 

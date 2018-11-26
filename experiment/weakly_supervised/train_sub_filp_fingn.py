@@ -11,7 +11,7 @@ import read_data_finegrain as scene_parsing_fg
 import datetime
 import pdb
 from BatchReader_multi_ellip_filp1 import *
-import CaculateAccurary as accu
+import CaculateAccurary_filp as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
@@ -170,7 +170,7 @@ class SeqFCNNet(FCNNet):
                 #ellipse loss
                 #self.ellip_acc = accu.caculate_ellip_accu(im, filenames, pred_anno, pred_pro, gt_ellip_info, if_valid)
                 #Hausdorff loss
-                self.ellip_acc = self.e_acc.caculate_ellip_accu(im, filenames, pred_anno, pred_pro, gt_ellip_info, if_valid, if_epoch)
+                self.ellip_acc = self.e_acc.caculate_ellip_accu(im, filenames, pred_anno, anno, gt_ellip_info, if_valid, if_epoch)
             
             else:
                 #self.accu_iou = 0
@@ -314,8 +314,8 @@ class SeqFCNNet(FCNNet):
                 ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
 
                 pred_anno, pred_seq_pro, summary_str, loss, self.accu, self.accu_iou = sess.run(
-                fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
-                #fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
+                #fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
+                fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
                 feed_dict={self.images: images_, 
                            self.annotations: annos_, self.lr: self.learning_rate,
                            self.keep_prob: 1,
@@ -408,8 +408,8 @@ class SeqFCNNet(FCNNet):
                 ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
                 
  
-                #pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
-                pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
+                pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
+                #pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
                 #pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
 
                                                                 feed_dict={self.images: images_, 

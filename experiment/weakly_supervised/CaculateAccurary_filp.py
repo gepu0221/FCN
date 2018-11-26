@@ -13,6 +13,14 @@ try:
 except Exception:
     from cfgs.config_acc import cfgs
 
+#Create ellipse error related folder.
+def create_ellipse_f():
+    train_error_path = cfgs.error_path
+    valid_error_path = cfgs.error_path+'_better'
+    if not os.path.exists(train_error_path):
+        os.makedirs(train_error_path)
+    if not os.path.exists(valid_error_path):
+        os.makedirs(valid_error_path)
 
 
 def remove_small_area(im):
@@ -98,8 +106,6 @@ class Ellip_acc(object):
             ellipse_info = (tuple(np.array([0,0])), tuple(np.array([0,0])), 0)
             loss = self.ellip_loss(pred_ellip, gt_ellip)
         
-        #sz_ = im.shape
-        #loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (sz_[0]*sz_[1])
         #save worse result
         if if_valid:
             error_path = cfgs.error_path+'_valid'
@@ -144,12 +150,37 @@ class Ellip_acc(object):
         sz = im.shape
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
         #tmp
-        
         fn = filename.strip().decode('utf-8')
-        fn_full = '%s%s.bmp' % ('img', fn.split('img')[1])
-        im_full = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
-        im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
-        
+        fn_full = '%s%s.bmp' % ('s8img', fn.split('img')[1]) 
+        path = os.path.join(cfgs.full_im_path, fn_full)
+        im = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
+        #im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
+        #pdb.set_trace()
+
+        #Get gt ellipse info
+        pts_gt = []
+        for ii in range(sz[0]):
+            for jj in range(sz[1]):
+                if anno[ii][jj] > 0:
+                    pts_gt.append([jj, ii])
+                    #im[ii][jj] = 255
+
+        pts_gt_ = np.array(pts_gt)
+        if pts_gt_.shape[0] > 5:
+            gt_ellipse_info = cv2.fitEllipse(pts_gt_)
+            gt_ellipse_info_ = gt_ellipse_info
+            #pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][0], ellipse_info[1][1]])
+            if gt_ellipse_info[2] > 150 or gt_ellipse_info[2] < 30:
+                angle = 180
+                gt_ellip = np.array([gt_ellipse_info[0][0], gt_ellipse_info[0][1], gt_ellipse_info[1][0], gt_ellipse_info[1][1]])
+            else:
+                angle = 90
+                gt_ellip = np.array([gt_ellipse_info[0][0], gt_ellipse_info[0][1], gt_ellipse_info[1][1], gt_ellipse_info[1][0]])
+
+            gt_ellip_info = (tuple(np.array([gt_ellipse_info[0][0], gt_ellipse_info[0][1]])), tuple(np.array([gt_ellipse_info[1][0], gt_ellipse_info[1][1]])), angle)
+
+       
+        #Get pred ellipse info
         for ii in range(sz[0]):
             for jj in range(sz[1]):
                 if pred[ii][jj] > 0:
@@ -170,6 +201,7 @@ class Ellip_acc(object):
                 pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][1], ellipse_info[1][0]])
 
             ellipse_info = (tuple(np.array([ellipse_info[0][0], ellipse_info[0][1]])), tuple(np.array([ellipse_info[1][0], ellipse_info[1][1]])), angle)
+
             loss = self.haus_loss(pred_ellip, gt_ellip)
         else:
             pred_ellip = np.array([0,0,0,0])
@@ -185,16 +217,7 @@ class Ellip_acc(object):
             cv2.ellipse(im,ellipse_info,(0,255,0),1)
             gt_ellip_info = (tuple(np.array([gt_ellip[0], gt_ellip[1]])), tuple(np.array([gt_ellip[2], gt_ellip[3]])), 0)
             cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
-            '''
-            print('filename: ', fn, ' loss: ',  loss)
-            print('gt_ellipse_info: ', gt_ellip)
-            print('pred_ellipse_info: ', pred_ellip)
-            print('gt_ellipse_info: ', gt_ellip_info)
-            print('pred_ellipse_info: ', ellipse_info_)
-            print('gt_ellipse_info: ', gt_ellip_info)
-            print('pred_ellipse_info: ', ellipse_info)
-            '''
-            
+                        
 
        
             if loss > cfgs.loss_thresh:

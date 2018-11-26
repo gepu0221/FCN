@@ -10,15 +10,15 @@ import TensorflowUtils as utils
 import read_data_finegrain as scene_parsing_fg
 import datetime
 import pdb
-from BatchReader_multi_ellip import *
-import CaculateAccurary as accu
+from BatchReader_multi_ellip_noLabel import *
+import CaculateAccurary_filp as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
 import shutil
 
 #from train_seq_parent import FCNNet
-from train_Unet_parent import U_Net as FCNNet
+from train_Unet_parent_fg import U_Net as FCNNet
 
 try:
     from .cfgs.config_train_u_net import cfgs
@@ -143,7 +143,7 @@ class SeqFCNNet(FCNNet):
     def loss(self):
 
         self.logits = self.inference(self.images, self.inference_name, self.channel, self.keep_prob)
-        self.logits = self.logits[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :]
+        #self.logits = self.logits[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :]
         self.pro = tf.nn.softmax(self.logits)
         self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
         
@@ -314,8 +314,8 @@ class SeqFCNNet(FCNNet):
                 ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
 
                 pred_anno, pred_seq_pro, summary_str, loss, self.accu, self.accu_iou = sess.run(
-                #fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
-                fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
+                fetches=[self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
+                #fetches=[self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
                 feed_dict={self.images: images_, 
                            self.annotations: annos_, self.lr: self.learning_rate,
                            self.keep_prob: 1,
@@ -408,8 +408,8 @@ class SeqFCNNet(FCNNet):
                 ellip_info_mean = np.mean(ellip_infos_[:, 2:], 1) / 4
                 
  
-                pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
-                #pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
+                #pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower],
+                pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor, self.accu_iou_tensor],
                 #pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
 
                                                                 feed_dict={self.images: images_, 

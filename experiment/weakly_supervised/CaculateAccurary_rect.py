@@ -271,57 +271,7 @@ class Ellip_acc(object):
 
         return loss
 
-    #generate ellipse to compare ellispes info
-    def caculate_ellip_accu_once(self, im, filename, pred, pred_pro, gt_ellip, if_valid=False):
-        #gt_ellipse [(x,y), w, h]
-        fn = filename.strip().decode('utf-8')
-        pts = []
-        _, p, hierarchy = cv2.findContours(pred, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        #tmp
-        c_im_show = np.zeros((sz[0], sz[1], 3))
-        cv2.drawContours(c_im_show, p, -1, (0, 255, 0), 1)
-
-        
-        for i in range(len(p)):
-            for j in range(len(p[i])):
-                pts.append(p[i][j])
-        pts_ = np.array(pts)
-        if pts_.shape[0] > 5:
-            ellipse_info = cv2.fitEllipse(pts_)
-            pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][0], ellipse_info[1][1]])
-            ellipse_info = (tuple(np.array([ellipse_info[0][0], ellipse_info[0][1]])), tuple(np.array([ellipse_info[1][0], ellipse_info[1][1]])), 0)
-            loss = self.haus_loss(pred_ellip, gt_ellip)
-        else:
-            pred_ellip = np.array([0,0,0,0])
-            ellipse_info = (tuple(np.array([0,0])), tuple(np.array([0,0])), 0)
-            loss = self.ellip_loss(pred_ellip, gt_ellip)
-        
-        #sz_ = im.shape
-        #loss = np.sum(np.power((np.array(gt_ellip)-pred_ellip), 2)) / (sz_[0]*sz_[1])
-        #save worse result
-        if if_valid:
-            error_path = cfgs.error_path+'_valid'
-        else:
-            error_path = cfgs.error_path
-
-        if fn in self.shelter_map:
-            im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
-            cv2.ellipse(im,ellipse_info,(0,255,0),1)
-            gt_ellip_info = (tuple(np.array([gt_ellip[0], gt_ellip[1]])), tuple(np.array([gt_ellip[2], gt_ellip[3]])), 0)
-            cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
-            path_ = os.path.join(error_path, filename.strip().decode('utf-8')+'_'+str(int(loss))+'.bmp')
-            cv2.imwrite(path_, im)
-
-            #heatmap
-            heat_map = density_heatmap(pred_pro[:, :, 1])
-            cv2.imwrite(os.path.join(error_path, filename.strip().decode('utf-8')+'_heatseq_.bmp'), heat_map)
-            
-            #tmp
-            contours_path_ = os.path.join(error_path, filename.strip().decode('utf-8')+'_'+str(int(loss))+'_contour.bmp')
-            cv2.imwrite(contours_path_, c_im_show)
-
-        return loss
-
+    
     def divide_shelter_once(self, im, filename, pred, pred_pro, gt_ellip, if_valid=False, is_save=True):
         '''
         divide the shelter and not shelter
@@ -358,7 +308,7 @@ class Ellip_acc(object):
                 if pred[ii][jj] == 1:
                     pts.append([jj, ii])
                     #im[ii][jj] = 255
-
+                    
         pts_ = np.array(pts)
         if pts_.shape[0] > 5:
             ellipse_info = cv2.fitEllipse(pts_)
@@ -383,7 +333,7 @@ class Ellip_acc(object):
             
             #save worse result
             error_path = cfgs.error_path
-            #im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
+            im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
             #cv2.ellipse(im,ellipse_info,(0,255,0),1)
             #gt_ellip_info = (tuple(np.array([gt_ellip[0], gt_ellip[1]])), tuple(np.array([gt_ellip[2], gt_ellip[3]])), 0)
             #cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
@@ -400,14 +350,14 @@ class Ellip_acc(object):
             ry = cy + rect_w + 1
             
             #im = im * pred
-
-            im_ = np.append(im, im, axis=2)
-            im_ = np.append(im_, im, axis=2).astype(np.uint8)
             
-            im_ = im_[lx:rx, ly:ry, :]
+            #im_ = np.append(im, im, axis=2)
+            #im_ = np.append(im_, im, axis=2).astype(np.uint8)
+            
+            im_ = im[lx:rx, ly:ry, :]
             im = cv2.resize(im_, (cfgs.re_sz[0], cfgs.re_sz[1]), interpolation=cv2.INTER_CUBIC)
             
-            im = np.where(im>0, 1, 0)*255
+            #im = np.where(im>0, 1, 0)*255
 
             
             if loss > cfgs.loss_thresh:

@@ -404,8 +404,10 @@ class SeqFCNNet(FCNNet):
 
 
                     writer.add_summary(summary_str, global_step=step)
-                    self.calculate_acc(annos_, filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, True, if_epoch)
+                    #self.calculate_acc(annos_, filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, True, if_epoch)
                     #self.calculate_acc(mask_ims.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                    self.calculate_acc(cur_ims[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+
 
 
                     self.accu = 0
@@ -515,7 +517,9 @@ class SeqFCNNet(FCNNet):
 
                 #2. calculate accurary
                 #self.calculate_acc(mask_ims.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
-                self.calculate_acc(annos_, filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                #self.calculate_acc(annos_, filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+
 
  
 

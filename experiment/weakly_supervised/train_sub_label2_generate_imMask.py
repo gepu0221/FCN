@@ -242,8 +242,8 @@ class SeqFCNNet(FCNNet):
         self.get_data_cache()
         pdb.set_trace()
         self.loss()
-        #self.generate_mask_im_filter_occ()
-        self.generate_mask_im_filter_occ_show()
+        self.generate_mask_im_filter_occ()
+        #self.generate_mask_im_filter_occ_show()
         self.accuracy()
         self.accuracy_lower()
         self.train_optimizer()
@@ -537,7 +537,7 @@ class SeqFCNNet(FCNNet):
                 self.im_mask_view(filenames, pred_anno_, pred_seq_pro_, images_, step)
 
                 #2. calculate accurary
-                #self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :].copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :].copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
                 self.accu = 0
                 self.accu_iou = 0
                 loss = 0
