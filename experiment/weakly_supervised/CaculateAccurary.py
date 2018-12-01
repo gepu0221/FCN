@@ -342,19 +342,20 @@ class Ellip_acc(object):
         sz = im.shape
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
         #tmp
-        
+        '''
         fn = filename.strip().decode('utf-8')
         fn_full = '%s%s.bmp' % ('img', fn.split('img')[1])
         im_full = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
         im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
-        
+        '''
         #print(filename.strip().decode('utf-8'))
         #pred = save_max_area(pred)
+        #pdb.set_trace()
         pred = remove_small_area(pred)
         for ii in range(sz[0]):
             for jj in range(sz[1]):
-                #if pred[ii][jj] > 0:
-                if pred[ii][jj] == 2:
+                if pred[ii][jj] > 0:
+                #if pred[ii][jj] == 2:
                     pts.append([jj, ii])
                     #im[ii][jj] = 255
 
@@ -391,17 +392,8 @@ class Ellip_acc(object):
             #im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
             cv2.ellipse(im,ellipse_info,(0,255,0),1)
             gt_ellip_info = (tuple(np.array([gt_ellip[0], gt_ellip[1]])), tuple(np.array([gt_ellip[2], gt_ellip[3]])), 0)
-            cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
-            '''
-            print('filename: ', fn, ' loss: ',  loss)
-            print('gt_ellipse_info: ', gt_ellip)
-            print('pred_ellipse_info: ', pred_ellip)
-            print('gt_ellipse_info: ', gt_ellip_info)
-            print('pred_ellipse_info: ', ellipse_info_)
-            print('gt_ellipse_info: ', gt_ellip_info)
-            print('pred_ellipse_info: ', ellipse_info)
-            '''
-            
+            #cv2.ellipse(im,gt_ellip_info,(0,0,255),1)
+                        
 
        
             if loss > cfgs.loss_thresh:

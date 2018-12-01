@@ -12,7 +12,8 @@ import read_data as scene_parsing
 import datetime
 import pdb
 from BatchReader_multi_ellip_label2 import *
-import CaculateAccurary_rect as accu
+import CaculateAccurary_video as accu
+#import CaculateAccurary_rect as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
@@ -190,6 +191,8 @@ class SeqFCNNet(FCNNet):
 
         self.mask_ims = tf.multiply(self.mask_ims_lower, self.inst_mask)
         #self.mask_ims = self.mask_ims_lower
+        #self.mask_ims = tf.multiply(self.images[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], self.inst_mask)
+
         #pdb.set_trace()
         self.mask_anno = tf.multiply(self.pred_anno_lower, tf.cast(self.inst_mask, tf.int32))
         #pdb.set_trace()
@@ -216,6 +219,8 @@ class SeqFCNNet(FCNNet):
         self.get_data_cache()
         self.loss()
         self.generate_mask_im_filter_occ()
+        #self.generate_mask_im_filter_occ_show()
+
         self.accuracy()
         self.accuracy_lower()
         self.train_optimizer()
@@ -310,8 +315,8 @@ class SeqFCNNet(FCNNet):
         pred_anno_im = cv2.cvtColor((pred_anno).astype(np.uint8), cv2.COLOR_RGB2BGR)
         cv2.imwrite(os.path.join(path_, filename+'.bmp'), pred_anno_im)
         #cv2.imwrite(os.path.join(path_, filename+'_im.bmp'), im[:,:,0])
-        #heatmap = density_heatmap(pred_pro[:,:,1])
-        #cv2.imwrite(os.path.join(path_, filename+'_heat.bmp'), heatmap)
+        heatmap = density_heatmap(pred_pro[:,:,1])
+        cv2.imwrite(os.path.join(path_, filename+'_heat.bmp'), heatmap)
         if cfgs.view_seq:
             for i in range(cfgs.seq_num):
                 im_ = im[:,:,self.cur_channel-1+i]
@@ -401,12 +406,15 @@ class SeqFCNNet(FCNNet):
                     #View result
                     #self.view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
                     #self.im_mask_view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
+                    #self.im_mask_view_valid(filenames, mask_ims, pred_seq_pro_, images_, step)
+
 
 
                     writer.add_summary(summary_str, global_step=step)
+                    self.ellip_acc = 0
                     #self.calculate_acc(annos_, filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, True, if_epoch)
-                    #self.calculate_acc(mask_ims.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
-                    self.calculate_acc(cur_ims[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                    self.calculate_acc(mask_ims.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                    #self.calculate_acc(cur_ims[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
 
 
 
@@ -417,9 +425,11 @@ class SeqFCNNet(FCNNet):
                     sum_acc_iou += self.accu_iou
                     sum_acc_ellip += self.ellip_acc
                     total_loss += loss
-                    print('\r' + 12 * ' ', end='')
-                    print('epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
-        
+                    #print('\r' + 12 * ' ', end='')
+                    line = 'epoch %5d\t learning_rate = %g\t step = %4d\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % (epoch, self.learning_rate, step, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count))
+                    utils.clear_line(len(line))
+                    print('\r' + line, end='')
+
             #End valid data
             #count -= 1
             print('epoch %5d\t learning_rate = %g\t loss = %.4f\t valid_accuracy = %.2f%%\t valid_iou_accuracy = %.2f%%\t valid_ellip_acc = %.2f' % 
@@ -509,16 +519,16 @@ class SeqFCNNet(FCNNet):
                                                                          self.ellip_axis: ellip_info_mean})
                 
 
-                #print('laebls: ', labels)
-                #print('pred_labels: ', self.pred_label_)
+                #self.im_mask_view(filenames, mask_ims, pred_seq_pro_, images_, step)
                 #self.im_mask_view(filenames, pred_anno_, pred_seq_pro_, images_, step)
                 #cv2.imwrite('%s_anno.bmp' % filenames[0], pred_anno_[0]*127)
                 #pdb.set_trace()
 
                 #2. calculate accurary
-                #self.calculate_acc(mask_ims.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                self.ellip_acc = 0
+                self.calculate_acc(mask_ims.copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
                 #self.calculate_acc(annos_, filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
-                self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                #self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
 
 
  
@@ -527,6 +537,7 @@ class SeqFCNNet(FCNNet):
                 self.accu_iou = 0
                 loss = 0
                 self.acc_label_ = 0
+                #self.ellip_acc = 0
 
                 sum_acc += self.accu
                 sum_acc_iou += self.accu_iou

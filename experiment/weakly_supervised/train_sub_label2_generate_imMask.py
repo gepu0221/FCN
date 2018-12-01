@@ -62,7 +62,6 @@ class SeqFCNNet(FCNNet):
     def get_data_cache(self):
         with tf.device('/cpu:0'):
             self.train_images, self.train_cur_ims, self.train_ellip_infos, self.train_annotations,self.train_labels,  self.train_filenames = get_data_cache(self.train_records, self.batch_size, False, 'get_data_train')
-            pdb.set_trace()
             self.valid_images, self.valid_cur_ims, self.valid_ellip_infos, self.valid_annotations, self.valid_labels, self.valid_filenames = get_data_cache(self.valid_records, self.batch_size, False, 'get_data_valid_mask')
 
 
@@ -171,7 +170,7 @@ class SeqFCNNet(FCNNet):
         
         self.mask_ims = tf.multiply(tf.cast(self.pred_anno_lower, dtype=tf.float32), self.images)
 
-
+    #generate mask im(I) of filter occlusion of instrument
     def generate_mask_im_filter_occ(self):
         
         '''
@@ -189,7 +188,7 @@ class SeqFCNNet(FCNNet):
         self.pred_inst_lower = tf.expand_dims(tf.where(tf.less_equal(self.pro[:, :, :, 1], cfgs.inst_low_pro), 1-im_comp, im_comp), dim=3)
 
         self.inst_mask = tf.cast(tf.where(tf.equal(self.pred_inst_lower, comp), 1-comp, comp), tf.float32)
-
+        #self.mask_ims = self.inst_mask
         self.mask_ims = tf.multiply(self.mask_ims_lower, self.inst_mask)
         #self.mask_ims = self.mask_ims_lower
     
@@ -219,6 +218,33 @@ class SeqFCNNet(FCNNet):
 
         self.mask_ims = tf.where(tf.less_equal(self.mask_ims, 0), self.images[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :], comp3)
 
+    
+    
+    #generate mask Anno of filter occlusion of instrument
+    def generate_mask_anno_filter_occ(self):
+        
+        '''
+        Generate anno mask after Net1 using a lower probility.
+        Filter occlusion part which is labeled with 2.
+        '''
+        
+        self.mask_ims_lower = tf.cast(self.pred_anno_lower, dtype=tf.float32)
+        sz = [self.batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.int64)
+        #Instrument mask filter
+        sz = [cfgs.batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1]]
+        im_comp = tf.ones(sz, dtype=tf.int64)
+        self.pred_inst_lower = tf.expand_dims(tf.where(tf.less_equal(self.pro[:, :, :, 1], cfgs.inst_low_pro), 1-im_comp, im_comp), dim=3)
+
+        self.inst_mask = tf.cast(tf.where(tf.equal(self.pred_inst_lower, comp), 1-comp, comp), tf.float32)
+     
+        self.mask_ims_ = tf.multiply(self.mask_ims_lower, self.inst_mask) * 255
+        self.mask_ims = self.mask_ims_
+        self.mask_ims = tf.concat([self.mask_ims, self.mask_ims_], axis=3)
+        self.mask_ims = tf.concat([self.mask_ims, self.mask_ims_], axis=3)
+        pdb.set_trace()
+        
+    
     #3. accuracy
     def calculate_acc(self, im, filenames, pred_anno, pred_pro, anno, gt_ellip_info, if_valid=False, if_epoch=True):
         with tf.name_scope('ellip_accu'):
@@ -240,10 +266,10 @@ class SeqFCNNet(FCNNet):
     def build(self):
         
         self.get_data_cache()
-        pdb.set_trace()
         self.loss()
-        self.generate_mask_im_filter_occ()
-        #self.generate_mask_im_filter_occ_show()
+        #self.generate_mask_im_filter_occ()
+        self.generate_mask_im_filter_occ_show()
+        #self.generate_mask_anno_filter_occ()
         self.accuracy()
         self.accuracy_lower()
         self.train_optimizer()
@@ -432,7 +458,8 @@ class SeqFCNNet(FCNNet):
 
 
                     writer.add_summary(summary_str, global_step=step)
-                    #self.calculate_acc(cur_ims.copy(), filenames, pred_anno, pred_seq_pro, annos_, ellip_infos_, True, if_epoch)
+                    self.ellip_acc = 0
+                    self.calculate_acc(cur_ims.copy(), filenames, pred_anno, pred_seq_pro, annos_, ellip_infos_, True, if_epoch)
                     self.accu = 0
                     self.accu_iou = 0
                     loss = 0
@@ -537,7 +564,7 @@ class SeqFCNNet(FCNNet):
                 self.im_mask_view(filenames, pred_anno_, pred_seq_pro_, images_, step)
 
                 #2. calculate accurary
-                self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :].copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
+                #self.calculate_acc(cur_ims_[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :].copy(), filenames, pred_anno_, pred_seq_pro_, annos_, ellip_infos_, if_epoch=if_epoch)
                 self.accu = 0
                 self.accu_iou = 0
                 loss = 0
