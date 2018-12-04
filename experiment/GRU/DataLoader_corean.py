@@ -60,6 +60,7 @@ class DataLoader_c():
             frame_path = os.path.join(cfgs.image_path, fn_)
             #np.newaxis: keep origin channel number
             im = cv2.imread(frame_path, cv2.IMREAD_COLOR)
+            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
             im = cv2.resize(im, (w, h), interpolation=cv2.INTER_CUBIC)
             im = im.astype(np.float32)[i0:i1, j0:j1][np.newaxis, ...]
             

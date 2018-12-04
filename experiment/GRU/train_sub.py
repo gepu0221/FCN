@@ -201,14 +201,18 @@ class SeqFCNNet(FCNNet):
             static_segm = []
             for frame in range(cfgs.seq_frames):
                 im = images_pad[frame]
-                
-                cv2.imwrite('im.bmp', im[0].astype(np.uint8))
+                '''
+                var_list = tf.trainable_variables()
+                var_not_flow = [k for k in var_list if not k.name.startswith('flow')]
+                var_name = [k for k in var_not_flow if k.name.startswith('inference')]
+                values = sess.run(var_name)
+                #for k,v in zip(var_name, values):
+                    #print('var: ', k)
+                    #print(v)
+                pdb.set_trace()
+                '''
                 x_logits, x, x_pro= sess.run([self.static_output, self.static_anno_pred, self.unet_pro],
-                                    feed_dict={self.unet_images: im,
-                                               self.class_labels: np.array([0])})
-
-                cv2.imwrite('seg.bmp', x*127)
-                #pdb.set_trace()
+                                    feed_dict={self.unet_images: im})
 
                 static_segm.append(x_logits)
             
@@ -229,9 +233,9 @@ class SeqFCNNet(FCNNet):
                         feed_dict=rnn_input)
 
             
-            #self.view(np.expand_dims(fn, 0), pred, pred_pro, images[cfgs.seq_frames-1], step)
-            x = np.expand_dims(np.expand_dims(x, 0), 3)
-            self.view(np.expand_dims(fn, 0), x, x_pro, images[cfgs.seq_frames-1], step)
+            self.view(np.expand_dims(fn, 0), pred, pred_pro, images[cfgs.seq_frames-1], step)
+            #x = np.expand_dims(np.expand_dims(x, 0), 3)
+            #self.view(np.expand_dims(fn, 0), x, x_pro, images[cfgs.seq_frames-1], step)
             
             #2. calculate accurary
             self.ellip_acc = 0

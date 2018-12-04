@@ -7,7 +7,7 @@ import math
 import os
 import cv2
 import models.TensorflowUtils as utils
-import models.G_Layers_combine as utils_layers
+import models.G_Layers as utils_layers
 import datetime
 import pdb
 #import tool.CaculateAccurary as accu
@@ -63,7 +63,15 @@ class U_Net(object):
         self.eps = cfgs.eps
         self.alpha = cfgs.alpha
 
+    #1. get data
+    def get_data_cache(self):
+        with tf.device('/cpu:0'):
+            #train data loader
+            self.train_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames)
+            #valid data loader
+            self.valid_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames)
 
+    #2. Net
     def Pre_Net(self):
 
         '''
@@ -90,7 +98,7 @@ class U_Net(object):
         self.unet_infer_name = 'inference'
         self.unet_ch = cfgs.cur_channel + cfgs.seq_num
         self.unet_keep_pro = cfgs.keep_prob
-        self.class_labels = tf.placeholder(tf.int32, shape=[None], name='class_occlusion_label')
+        #self.class_labels = tf.placeholder(tf.int32, shape=[None], name='class_occlusion_label')
         self.static_output, self.static_anno_pred = self.u_net_inference(self.unet_images, self.unet_infer_name, self.unet_ch, self.unet_keep_pro)
 
         #4. Init RNN net
@@ -98,15 +106,6 @@ class U_Net(object):
         self.RNN = STGRU([self.NUM_OF_CLASSESS, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1]], [7, 7], bilinear_warping_module)
         self.GRU_op()
         
-    #1. get data
-    def get_data_cache(self):
-        with tf.device('/cpu:0'):
-            #train data loader
-            self.train_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames)
-            #valid data loader
-            self.valid_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames)
-
-    #2. net
     def u_net_inference(self, images, inference_name, channel, keep_prob):
         """
         Semantic segmentation network definition
@@ -124,12 +123,11 @@ class U_Net(object):
         with tf.variable_scope(inference_name):
             
             #U-Net
-            logits, _ = self.u_net.u_net_op(x=processed_images, 
+            logits = self.u_net.u_net_op(x=processed_images, 
                                          keep_prob_=keep_prob, 
                                          channels=channel,
                                          n_class = cfgs.n_class,
                                          layers = cfgs.layers,
-                                         class_convs_num = cfgs.class_convs_num,
    
                                          features_root=cfgs.features_root,
                                          filter_size = cfgs.filter_size,
@@ -344,7 +342,7 @@ class U_Net(object):
         var_static = [k for k in var_not_flow if k.name.startswith('inference')]
         var_gru = [k for k in var_not_flow if not k.name.startswith('inference')]
         var_flow = [k for k in var_list if k.name.startswith('flow')]
-        pdb.set_trace()
+        
         loader_static = self.return_saver_ckpt(sess, cfgs.unet_logs_dir, var_static)
         loader_flow = self.return_saver(sess, cfgs.flow_logs_dir, var_flow)
         saver = self.return_saver_ckpt(sess, cfgs.gru_logs_dir, var_gru)
