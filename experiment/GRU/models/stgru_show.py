@@ -57,10 +57,12 @@ class STGRU:
         input_segmentation = tf.unstack(input_segmentation_tensor, num=N_steps)
 
         outputs = [input_segmentation[0]]
+        prev_warpings = []
         for t in range(1, N_steps):
-            h = self.get_GRU_cell(input_images[t], input_images[t-1], \
+            h, prev_warping, I_diff, h_prev_warped = self.get_GRU_cell(input_images[t], input_images[t-1], \
                 input_flow[t-1], outputs[-1], input_segmentation[t])
             outputs.append(h)
+            prev_warpings.append(prev_warping)
 
         # the loss is tricky to implement since softmaxloss requires [i,j] matrix
         # with j ranging over the classes
@@ -83,71 +85,9 @@ class STGRU:
         
         opt = opt.minimize(loss)
         return opt, loss, prediction, pred_pro, learning_rate, \
-          input_images_tensor, input_flow_tensor, input_segmentation_tensor, targets
-    
-    #Add by gp on 2018/12/05
-    def slow_change_loss(self, h_prev, h):
+          input_images_tensor, input_flow_tensor, input_segmentation_tensor, targets, \
+          prev_warping, I_diff, h_prev_warped
 
-        '''
-            Caculate slow change loss.
-            Args:
-                h_prev: logits of prev frame.
-                h: logits of current frame.
-        '''
-        
-        sz = [self.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
-        im_comp = tf.ones(sz, dtype=tf.int64)
-
-        
-
-        #Generate instrument mask using cfgs.inst_low_pro
-        self.inst_mask = tf.expand_dims(tf.where(tf.less_equal(self.inst_mask_pro[:, :, :, 1], cfgs.inst_low_pro), 1-im_comp, im_comp), dim=3)
-
-        #Generate corean mask using cfgs.low_pro
-        self.corn_mask = tf.expand_dims(tf.where(tf.less_equal(self.corn_mask_pro[:, :, :, 2], cfgs.low_pro), 1-im_comp, im_comp), dim=3)
-
-
-    def get_optimizer_slow_change(self, N_steps):
-        '''
-            Slow change: prev frame and current frame shouldn't change abruptly. 
-        '''
-        input_images_tensor = tf.placeholder('float', [N_steps, 1, self.height, self.width, 3], name="gru_input_images")
-        input_images = tf.unstack(input_images_tensor, num=N_steps)
-
-        input_flow_tensor = tf.placeholder('float', [N_steps-1, 1, self.height, self.width, 2], name="gru_input_flows")
-        input_flow = tf.unstack(input_flow_tensor, num=N_steps-1)
-
-        input_segmentation_tensor = tf.placeholder('float', [N_steps, 1, self.height, self.width, self.channels], name="gru_input_unaries")
-        input_segmentation = tf.unstack(input_segmentation_tensor, num=N_steps)
-
-        outputs = [input_segmentation[0]]
-        for t in range(1, N_steps):
-            h = self.get_GRU_cell(input_images[t], input_images[t-1], \
-                input_flow[t-1], outputs[-1], input_segmentation[t])
-            outputs.append(h)
-
-        # the loss is tricky to implement since softmaxloss requires [i,j] matrix
-        # with j ranging over the classes
-        # the image has to be manipulated to fit
-        scores = tf.reshape(outputs[-1], [self.height*self.width, self.channels])
-        prediction = tf.argmax(scores, 1)
-        prediction = tf.reshape(prediction, [self.height, self.width])
-
-        targets = tf.placeholder('int64', [self.height, self.width])
-        targets_r = tf.reshape(targets, [self.height*self.width])
-        idx = targets_r < self.channels # classes are 0,1,...,c-1 with 255 being unknown
-        loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=tf.boolean_mask(scores, idx), labels=tf.boolean_mask(targets_r, idx)))
-        
-        #Add by gp
-        pred_pro = tf.reshape(tf.nn.softmax(tf.boolean_mask(scores, idx)),[self.height, self.width, self.channels])
-
-        learning_rate = tf.placeholder('float', [])
-        opt = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.95, beta2=0.99, epsilon=1e-8)
-        
-        opt = opt.minimize(loss)
-        return opt, loss, prediction, pred_pro, learning_rate, \
-          input_images_tensor, input_flow_tensor, input_segmentation_tensor, targets
 
     def get_GRU_cell(self, input_image, prev_image, flow_input, h_prev, unary_input):
         # apply softmax to h_prev and unary_input
@@ -157,7 +97,9 @@ class STGRU:
         unary_input = unary_input - 1./19
 
         I_diff = input_image - self.bilinear_warping_module.bilinear_warping(prev_image, flow_input)
-        self.prev_warping = self.bilinear_warping_module.bilinear_warping(prev_image, flow_input)
+        prev_warping = self.bilinear_warping_module.bilinear_warping(prev_image, flow_input)
+        #prev_warping = self.bilinear_warping_module.bilinear_warping(input_image, flow_input)
+
         # candidate state
         h_prev_warped = self.bilinear_warping_module.bilinear_warping(h_prev, flow_input)
 
@@ -179,7 +121,7 @@ class STGRU:
 
         h = self.weights['lambda']*(1 - z)*h_prev_reset + z*h_tilde
 
-        return h
+        return h, prev_warping, I_diff, h_prev_warped
 
     def softmax_last_dim(self, x):
         # apply softmax to a 4D tensor along the last dimension

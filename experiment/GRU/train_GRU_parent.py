@@ -18,7 +18,9 @@ import shutil
 #Pretrain model
 from tensorflow.python.framework import ops
 from DataLoader_corean import DataLoader_c
-from models.stgru import STGRU
+#from models.stgru import STGRU
+from models.stgru_slow_change import STGRU
+#from models.stgru_show import STGRU
 from models.flownet2 import Flownet2
 
 
@@ -67,9 +69,9 @@ class U_Net(object):
     def get_data_cache(self):
         with tf.device('/cpu:0'):
             #train data loader
-            self.train_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames)
+            self.train_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.train_anno_path, cfgs.image_path)
             #valid data loader
-            self.valid_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames)
+            self.valid_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.val_anno_path, cfgs.image_path)
 
     #2. Net
     def Pre_Net(self):
@@ -78,23 +80,24 @@ class U_Net(object):
         Prepare all net models.
         '''
         #1. Load bilinear warping model.
-        bilinear_warping_module = tf.load_op_library('./misc/bilinear_warping.so')
+        self.bilinear_warping_module = tf.load_op_library('./misc/bilinear_warping.so')
         @ops.RegisterGradient("BilinearWarping")
         def _BilinearWarping(op, grad):
-            return bilinear_warping_module.bilinear_warping_grad(grad, op.inputs[0], op.inputs[1])
+            return self.bilinear_warping_module.bilinear_warping_grad(grad, op.inputs[0], op.inputs[1])
 
 
         #2. Init flownet
         with tf.variable_scope('flow'):
-            self.flow_network = Flownet2(bilinear_warping_module)
+            self.flow_network = Flownet2(self.bilinear_warping_module)
             self.flow_img0 = tf.placeholder(tf.float32)
             self.flow_img1 = tf.placeholder(tf.float32)
             self.flow_tensor = self.flow_network(self.flow_img0, self.flow_img1, flip=True)
+            self.warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img0, -self.flow_tensor)
 
         #3. init U-Net for static frame segmentation
         #with tf.variable_scope('seg_static'):
         self.u_net = utils_layers.U_Net_gp()
-        self.unet_images = tf.placeholder(tf.float32, shape=[None, self.IMAGE_SIZE[0]+4, self.IMAGE_SIZE[1], cfgs.seq_num+cfgs.cur_channel], name='input_image')
+        self.unet_images = tf.placeholder(tf.float32, shape=[None, cfgs.IMAGE_SIZE[0]+4, cfgs.IMAGE_SIZE[1], cfgs.seq_num+cfgs.cur_channel], name='input_image')
         self.unet_infer_name = 'inference'
         self.unet_ch = cfgs.cur_channel + cfgs.seq_num
         self.unet_keep_pro = cfgs.keep_prob
@@ -103,7 +106,8 @@ class U_Net(object):
 
         #4. Init RNN net
         
-        self.RNN = STGRU([self.NUM_OF_CLASSESS, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1]], [7, 7], bilinear_warping_module)
+        self.RNN = STGRU([self.NUM_OF_CLASSESS, self.IMAGE_SIZE[0], self.IMAGE_SIZE[1]], [7, 7], self.bilinear_warping_module)
+        #self.GRU_op_show()
         self.GRU_op()
         
     def u_net_inference(self, images, inference_name, channel, keep_prob):
@@ -132,7 +136,7 @@ class U_Net(object):
                                          features_root=cfgs.features_root,
                                          filter_size = cfgs.filter_size,
                                          pool_size = cfgs.pool_size)
-            self.unet_pro = tf.nn.softmax(logits)
+            self.unet_pro = tf.nn.softmax(logits)[:, 2:cfgs.IMAGE_SIZE[0]+2, :, :]
             anno_pred = tf.argmax(tf.nn.softmax(logits), dimension=3, name="prediction")
             #pdb.set_trace()
             print('logits shape', logits.shape)
@@ -143,13 +147,31 @@ class U_Net(object):
         
         self.gru_opt, self.gru_loss, self.gru_pred, self.gru_pred_pro, self.gru_lr,\
         self.gru_input_images_tensor, self.gru_input_flow_tensor,\
-        self.gru_input_seg_tensor, self.gru_targets = self.RNN.get_optimizer(cfgs.seq_frames)
+        self.gru_input_seg_tensor, self.gru_targets = self.RNN.get_optimizer_slow_change(cfgs.seq_frames)
+        #= self.RNN.get_optimizer(cfgs.seq_frames)
         #Expand dims
         self.gru_pred = tf.expand_dims(tf.expand_dims(self.gru_pred, axis=0), axis=-1)
         self.gru_targets_acc = tf.expand_dims(tf.expand_dims(self.gru_targets, axis=0), axis=-1)
         self.gru_pred_pro = tf.expand_dims(self.gru_pred_pro, axis=0)
 
         self.unary_grad_op = tf.gradients(self.gru_loss, self.gru_input_seg_tensor)
+
+    def GRU_op_show(self):
+        
+        self.gru_opt, self.gru_loss, self.gru_pred, self.gru_pred_pro, self.gru_lr,\
+        self.gru_input_images_tensor, self.gru_input_flow_tensor,\
+        self.gru_input_seg_tensor, self.gru_targets,\
+        self.gru_prev_warped, self.gru_I_diff, self.gru_h_prev_warped = self.RNN.get_optimizer(cfgs.seq_frames)
+        #Expand dims
+        self.gru_pred = tf.expand_dims(tf.expand_dims(self.gru_pred, axis=0), axis=-1)
+        self.gru_targets_acc = tf.expand_dims(tf.expand_dims(self.gru_targets, axis=0), axis=-1)
+        self.gru_pred_pro = tf.expand_dims(self.gru_pred_pro, axis=0)
+        self.gru_prev_warped = tf.cast(self.gru_prev_warped, tf.int32)
+        self.gru_pro_prev_warped = tf.nn.softmax(self.gru_h_prev_warped)
+        self.gru_anno_prev_warped = tf.argmax(tf.nn.softmax(self.gru_h_prev_warped), 3)
+        self.gru_I_diff = tf.abs(tf.cast(self.gru_I_diff, tf.int32))
+        self.unary_grad_op = tf.gradients(self.gru_loss, self.gru_input_seg_tensor)
+        
 
         
     #5. evaluation
@@ -325,11 +347,11 @@ class U_Net(object):
 
         return saver
         
-    def return_saver(self, sess, logs_dir, var_list):
+    def return_saver(self, sess, logs_dir, model_name, var_list):
         
         saver = tf.train.Saver(var_list)
         if os.path.exists(logs_dir):
-            saver.restore(sess, logs_dir)
+            saver.restore(sess, os.path.join(logs_dir, model_name))
             print('Model %s restore finished' % logs_dir)
 
         return saver
@@ -344,7 +366,7 @@ class U_Net(object):
         var_flow = [k for k in var_list if k.name.startswith('flow')]
         
         loader_static = self.return_saver_ckpt(sess, cfgs.unet_logs_dir, var_static)
-        loader_flow = self.return_saver(sess, cfgs.flow_logs_dir, var_flow)
+        loader_flow = self.return_saver(sess, cfgs.flow_logs_dir, cfgs.flow_logs_name, var_flow)
         saver = self.return_saver_ckpt(sess, cfgs.gru_logs_dir, var_gru)
 
         return saver
@@ -418,7 +440,7 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    step = self.train_one_epoch_remv_occ(sess, self.train_dl, cfgs.train_num, epoch, step)
 
                     #3.3 save model
                     self.valid_once(sess, self.valid_dl, cfgs.valid_num, epoch, step)

@@ -11,7 +11,7 @@ except Exception:
 
 
 class DataLoader_c():
-    def __init__(self, im_size, nbr_frames):
+    def __init__(self, im_size, nbr_frames, anno_path, im_path):
         '''
         Args:
             nbf_frames: number of back off
@@ -19,8 +19,12 @@ class DataLoader_c():
         self.im_size = im_size
         self.dataset_size = cfgs.IMAGE_SIZE
         self.nbr_frames = nbr_frames
+
+        self.anno_path = anno_path
+        self.image_path = im_path
+
         #Get the last frame of video sequence which number is nbr_frames. 
-        self.L = glob.glob(os.path.join(cfgs.anno_path, '*.bmp'))
+        self.L = glob.glob(os.path.join(self.anno_path, '*.bmp'))
 
         random.shuffle(self.L)
         self.idx = 0
@@ -54,10 +58,10 @@ class DataLoader_c():
         
         #Read ims
         for dt in range(-self.nbr_frames + 1, 1):
-            t = int(frame) + dt
+            t = int(frame) + dt * cfgs.inter
             
             fn_ = '%simg%05d.bmp' % (f, t)
-            frame_path = os.path.join(cfgs.image_path, fn_)
+            frame_path = os.path.join(self.image_path, fn_)
             #np.newaxis: keep origin channel number
             im = cv2.imread(frame_path, cv2.IMREAD_COLOR)
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)

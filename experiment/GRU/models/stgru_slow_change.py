@@ -2,6 +2,12 @@ import numpy as np
 import tensorflow as tf
 import pdb
 
+try:
+    from .cfgs.config import cfgs
+except Exception:
+    from cfgs.config import cfgs
+
+
 class STGRU:
     def __init__(self, tensor_size, conv_sizes, bilinear_warping_module):
         # tensor_size is something like 19 x 512 x 512
@@ -86,25 +92,40 @@ class STGRU:
           input_images_tensor, input_flow_tensor, input_segmentation_tensor, targets
     
     #Add by gp on 2018/12/05
-    def slow_change_loss(self, h_prev, h):
+    def slow_change_loss(self, h_prev, h, h_static):
 
         '''
             Caculate slow change loss.
             Args:
                 h_prev: logits of prev frame.
                 h: logits of current frame.
+                h_static: logits of current frame through static frame net(U_net).
         '''
         
-        sz = [self.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
+        sz = [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
         im_comp = tf.ones(sz, dtype=tf.int64)
 
-        
+        h_pro = tf.nn.softmax(h)
+        h_prev_pro = tf.nn.softmax(h_prev)
+        h_static_pro = tf.nn.softmax(h_static)
 
-        #Generate instrument mask using cfgs.inst_low_pro
-        self.inst_mask = tf.expand_dims(tf.where(tf.less_equal(self.inst_mask_pro[:, :, :, 1], cfgs.inst_low_pro), 1-im_comp, im_comp), dim=3)
+        #Generate instrument mask using cfgs.inst_low_pro using current h_stctic_pro
+        #cur_static_inst_mask = tf.expand_dims(tf.where(tf.less_equal(h_static_pro[:, :, :, 1], cfgs.inst_low_pro), 1-im_comp, im_comp), dim=3)
 
         #Generate corean mask using cfgs.low_pro
-        self.corn_mask = tf.expand_dims(tf.where(tf.less_equal(self.corn_mask_pro[:, :, :, 2], cfgs.low_pro), 1-im_comp, im_comp), dim=3)
+        #cur_corn_mask = tf.expand_dims(tf.where(tf.less_equal(h_pro[:, :, :, 2], cfgs.low_pro), 1-im_comp, im_comp), dim=3)
+        #prev_corn_mask = tf.expand_dims(tf.where(tf.less_equal(h_prev_pro[:, :, :, 2], cfgs.low_pro), 1-im_comp, im_comp), dim=3)
+        
+        cur_static_inst_mask = h_static_pro[:, :, :, 1]
+        cur_corn_mask = h_pro[:, :, :, 2]
+        prev_corn_mask = h_prev_pro[:, :, :, 2]
+
+        cur_filter = tf.multiply(cur_static_inst_mask, cur_corn_mask)
+        prev_filter = tf.multiply(cur_static_inst_mask, prev_corn_mask)
+
+        loss = tf.reduce_mean(tf.pow((cur_filter - prev_filter), 2))
+
+        return loss
 
 
     def get_optimizer_slow_change(self, N_steps):
@@ -121,10 +142,12 @@ class STGRU:
         input_segmentation = tf.unstack(input_segmentation_tensor, num=N_steps)
 
         outputs = [input_segmentation[0]]
+        loss_slow_ch = 0
         for t in range(1, N_steps):
-            h = self.get_GRU_cell(input_images[t], input_images[t-1], \
+            h, h_prev_warped = self.get_GRU_cell(input_images[t], input_images[t-1], \
                 input_flow[t-1], outputs[-1], input_segmentation[t])
             outputs.append(h)
+            loss_slow_ch += self.slow_change_loss(h_prev_warped, h, input_segmentation[t])
 
         # the loss is tricky to implement since softmaxloss requires [i,j] matrix
         # with j ranging over the classes
@@ -136,9 +159,11 @@ class STGRU:
         targets = tf.placeholder('int64', [self.height, self.width])
         targets_r = tf.reshape(targets, [self.height*self.width])
         idx = targets_r < self.channels # classes are 0,1,...,c-1 with 255 being unknown
-        loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(
+        loss_gt = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
             logits=tf.boolean_mask(scores, idx), labels=tf.boolean_mask(targets_r, idx)))
-        
+        #pdb.set_trace()
+        #loss = tf.add(tf.cast(loss_slow_ch, tf.float32), loss_gt)
+        loss = tf.cast(loss_slow_ch, tf.float32) + loss_gt
         #Add by gp
         pred_pro = tf.reshape(tf.nn.softmax(tf.boolean_mask(scores, idx)),[self.height, self.width, self.channels])
 
@@ -179,7 +204,7 @@ class STGRU:
 
         h = self.weights['lambda']*(1 - z)*h_prev_reset + z*h_tilde
 
-        return h
+        return h, h_prev_warped
 
     def softmax_last_dim(self, x):
         # apply softmax to a 4D tensor along the last dimension
