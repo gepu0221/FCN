@@ -13,6 +13,7 @@ from six.moves import xrange
 from tools.label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from tools.generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
 import shutil
+import random
 
 #from train_seq_parent import FCNNet
 from train_GRU_parent import U_Net as FCNNet
@@ -157,10 +158,7 @@ class SeqFCNNet(FCNNet):
         else:
             for i in range(num_):
                 self.view_one_valid(fns[i], pred_annos[i], pred_pros[i], ims[i], step)   
-
-    
                         
-
         
     def train_one_epoch(self, sess, data_loader, data_num, epoch, step):
         
@@ -201,23 +199,12 @@ class SeqFCNNet(FCNNet):
             static_segm = []
             for frame in range(cfgs.seq_frames):
                 im = images_pad[frame]
-                '''
-                var_list = tf.trainable_variables()
-                var_not_flow = [k for k in var_list if not k.name.startswith('flow')]
-                var_name = [k for k in var_not_flow if k.name.startswith('inference')]
-                values = sess.run(var_name)
-                #for k,v in zip(var_name, values):
-                    #print('var: ', k)
-                    #print(v)
-                pdb.set_trace()
-                '''
                 x_logits, x, x_pro= sess.run([self.static_output, self.static_anno_pred, self.unet_pro],
                                     feed_dict={self.unet_images: im})
 
                 static_segm.append(x_logits)
             
             # GRFP
-            
             rnn_input = {
                 self.gru_lr: cfgs.grfp_lr,
                 self.gru_input_images_tensor: np.stack(images),
@@ -225,14 +212,13 @@ class SeqFCNNet(FCNNet):
                 self.gru_input_seg_tensor: np.stack(static_segm),
                 self.gru_targets: gt
             }
-            
+
             _, loss, pred, pred_pro,\
             self.accu, self.accu_iou \
             = sess.run([self.gru_opt, self.gru_loss, self.gru_pred, self.gru_pred_pro,
                         self.accu_tensor, self.accu_iou_tensor], 
                         feed_dict=rnn_input)
-
-            
+            #pdb.set_trace()
             self.view(np.expand_dims(fn, 0), pred, pred_pro, images[cfgs.seq_frames-1], step)
             #x = np.expand_dims(np.expand_dims(x, 0), 3)
             #self.view(np.expand_dims(fn, 0), x, x_pro, images[cfgs.seq_frames-1], step)
@@ -340,7 +326,7 @@ class SeqFCNNet(FCNNet):
             mean_acc_ellip = sum_acc_ellip/count
             #3. calculate loss
             total_loss += loss
-            pdb.set_trace()   
+            #pdb.set_trace()   
             #4. time consume
             time_consumed = time.time() - t0
             time_per_batch = time_consumed/count

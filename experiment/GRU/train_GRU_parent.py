@@ -18,8 +18,8 @@ import shutil
 #Pretrain model
 from tensorflow.python.framework import ops
 from DataLoader_corean import DataLoader_c
-#from models.stgru import STGRU
-from models.stgru_slow_change import STGRU
+from models.stgru import STGRU
+#from models.stgru_slow_change import STGRU
 #from models.stgru_show import STGRU
 from models.flownet2 import Flownet2
 
@@ -92,7 +92,7 @@ class U_Net(object):
             self.flow_img0 = tf.placeholder(tf.float32)
             self.flow_img1 = tf.placeholder(tf.float32)
             self.flow_tensor = self.flow_network(self.flow_img0, self.flow_img1, flip=True)
-            self.warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img0, -self.flow_tensor)
+            self.warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.flow_tensor)
 
         #3. init U-Net for static frame segmentation
         #with tf.variable_scope('seg_static'):
@@ -147,8 +147,8 @@ class U_Net(object):
         
         self.gru_opt, self.gru_loss, self.gru_pred, self.gru_pred_pro, self.gru_lr,\
         self.gru_input_images_tensor, self.gru_input_flow_tensor,\
-        self.gru_input_seg_tensor, self.gru_targets = self.RNN.get_optimizer_slow_change(cfgs.seq_frames)
-        #= self.RNN.get_optimizer(cfgs.seq_frames)
+        self.gru_input_seg_tensor, self.gru_targets = self.RNN.get_optimizer(cfgs.seq_frames)
+        #= self.RNN.get_optimizer_slow_change(cfgs.seq_frames)
         #Expand dims
         self.gru_pred = tf.expand_dims(tf.expand_dims(self.gru_pred, axis=0), axis=-1)
         self.gru_targets_acc = tf.expand_dims(tf.expand_dims(self.gru_targets, axis=0), axis=-1)
@@ -440,8 +440,14 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    step = self.train_one_epoch_remv_occ(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    #step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    #for train_sub_flow
+                    #step = self.train_one_epoch_remv_occ(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    #step = self.train_one_epoch_remv_occ_segm(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    step = self.train_one_epoch_warp_inpt_flow(sess, self.train_dl, cfgs.train_num, epoch, step)
 
+                    #self.warp_one_im(sess, step)
+                    
                     #3.3 save model
                     self.valid_once(sess, self.valid_dl, cfgs.valid_num, epoch, step)
                     self.cur_epoch.load(epoch, sess)
