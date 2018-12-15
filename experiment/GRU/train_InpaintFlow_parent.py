@@ -14,10 +14,12 @@ import pdb
 from six.moves import xrange
 from tools.label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from tools.generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
+from tools.config import Config
 import shutil
 #Pretrain model
 from tensorflow.python.framework import ops
-from DataLoader_corean import DataLoader_c
+from DataLoader_corean_inpt_da import DataLoader_c
+#from DataLoader_corean_inpt import DataLoader_c
 from models.stgru import STGRU
 from models.flownet2 import Flownet2
 from models.inpaint_model import InpaintModel
@@ -45,7 +47,7 @@ class U_Net(object):
         self.learning_rate = float(init_lr)
         self.mode = mode
         self.current_itr_var = tf.Variable(0, dtype=tf.int32, name='current_itr', trainable=True)
-        self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch', trainable=False)
+        self.cur_epoch = tf.Variable(1, dtype=tf.int32, name='cur_epoch', trainable=True)
         #self.cur_batch_size = tf.placeholder(dtype=tf.int32, name='cur_batch_size')
 
        
@@ -68,9 +70,9 @@ class U_Net(object):
     def get_data_cache(self):
         with tf.device('/cpu:0'):
             #train data loader
-            self.train_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.train_anno_path, cfgs.image_path)
+            self.train_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.train_mask_path, cfgs.image_path, cfgs.da_im_path)
             #valid data loader
-            self.valid_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.val_anno_path, cfgs.image_path)
+            self.valid_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.val_mask_path, cfgs.image_path, cfgs.da_im_path)
 
     #2. Net
     def Pre_Net(self):
@@ -94,25 +96,40 @@ class U_Net(object):
             self.warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.flow_tensor)
 
         #3. Init flow-inpaint net
+        config = Config('cfgs/inpaint.yml')
         # [-1, 1]?
-        self.inpt_data = tf.placeholder(shape=[None, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], cfgs.channel], dtype=tf.float32)
+        self.inpt_data = tf.placeholder(shape=[None, cfgs.IMAGE_SIZE[0]-4, cfgs.IMAGE_SIZE[1]*2, cfgs.inpt_in_channel], dtype=tf.float32)
+        self.max_v = tf.placeholder(tf.float32)
         self.inpt_network = InpaintModel()
-        self.inpt_g_vars, self.inpt_pred_complete = self.inpt_network.build_graph(
+        self.inpt_g_vars, self.inpt_pred_flow = self.inpt_network.build_graph(
             self.inpt_data, config=config)
+        self.inpt_pred_flow = self.inpt_pred_flow * self.max_v
+        paddings = tf.constant([[0, 0], [0, 4], [0, 0], [0, 0]])
+        self.inpt_pred_flow = tf.pad(self.inpt_pred_flow, paddings, 'CONSTANT')
+      
 
 
     def loss(self):
         
-        self.inpt_flow = tf.placeholder(tf.float32)
-        self.inpt_warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.inpt_flow)
-        self.loss = tf.reduce_mean(tf.abs(self.inpt_warpded_im - self.flow_img0))
+        #self.inpt_flow = tf.placeholder(tf.float32)
+        self.inpt_warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.inpt_pred_flow)
+        self.loss = tf.reduce_mean(tf.abs(self.inpt_warped_im - self.flow_img0))
 
     def train_optimizer(self):
 
+        
+        #optimizer = tf.train.AdamOptimizer(cfgs.inpt_lr, beta1=0.5, beta2=0.9)
         optimizer = tf.train.AdamOptimizer(cfgs.inpt_lr)
+
         var_list = tf.trainable_variables()
-        grads = optimizer.compute_gradients(self.loss, var_list=var_list)
-        self.opt = optimizer.apply_gradients(gards)
+
+        var_not_flow = [k for k in var_list if not k.name.startswith('flow')]
+
+        var_inpt = [k for k in var_list if k.name.startswith('inpaint_net')]
+        var_flow = [k for k in var_list if k.name.startswith('flow')]
+
+        grads = optimizer.compute_gradients(self.loss, var_list=var_inpt)
+        self.opt = optimizer.apply_gradients(grads)
                
     #5. evaluation
     def accuracy(self):
@@ -298,16 +315,15 @@ class U_Net(object):
      
     def recover_model(self, sess):
         var_list = tf.trainable_variables()
-        
         var_not_flow = [k for k in var_list if not k.name.startswith('flow')]
 
-        var_static = [k for k in var_not_flow if k.name.startswith('inference')]
-        var_gru = [k for k in var_not_flow if not k.name.startswith('inference')]
+        #var_static = [k for k in var_not_flow if k.name.startswith('inference')]
+        var_inpt = [k for k in var_list if k.name.startswith('inpaint_net')]
         var_flow = [k for k in var_list if k.name.startswith('flow')]
         
-        loader_static = self.return_saver_ckpt(sess, cfgs.unet_logs_dir, var_static)
+        #loader_static = self.return_saver_ckpt(sess, cfgs.unet_logs_dir, var_static)
         loader_flow = self.return_saver(sess, cfgs.flow_logs_dir, cfgs.flow_logs_name, var_flow)
-        saver = self.return_saver_ckpt(sess, cfgs.gru_logs_dir, var_gru)
+        saver = self.return_saver_ckpt(sess, cfgs.gru_logs_dir, var_not_flow)
 
         return saver
     
@@ -380,16 +396,16 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    #step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
                     #for train_sub_flow
                     #step = self.train_one_epoch_remv_occ(sess, self.train_dl, cfgs.train_num, epoch, step)
                     #step = self.train_one_epoch_remv_occ_segm(sess, self.train_dl, cfgs.train_num, epoch, step)
-                    step = self.train_one_epoch_warp_inpt_flow(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    #step = self.train_one_epoch_warp_inpt_flow(sess, self.train_dl, cfgs.train_num, epoch, step)
 
                     #self.warp_one_im(sess, step)
                     
                     #3.3 save model
-                    self.valid_once(sess, self.valid_dl, cfgs.valid_num, epoch, step)
+                    #self.valid_once(sess, self.valid_dl, cfgs.valid_num, epoch, step)
                     self.cur_epoch.load(epoch, sess)
                     self.current_itr_var.load(step, sess)
                     saver.save(sess, cfgs.gru_logs_dir + 'model.ckpt', step)

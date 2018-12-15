@@ -156,7 +156,7 @@ class SeqFCNNet(FCNNet):
 
 
     def view_one(self, fn, pred_anno, pred_pro, im, step, str_a='', if_more=True):
-        path_ = os.path.join(cfgs.view_path, 'train')
+        path_ = os.path.join(cfgs.view_path, 'valid')
         
         if cfgs.test_view:
             filename = fn
@@ -751,10 +751,10 @@ class SeqFCNNet(FCNNet):
             #self.view(np.expand_dims(fn, 0), warped_inpt*127, (static_anno[cfgs.seq_frames-2]*127).astype(np.uint8), (static_anno[cfgs.seq_frames-1]*127).astype(np.uint8), step, '_inpt', if_more=False)
             self.view(np.expand_dims(fn, 0), warped_insect_inpt*255, (static_anno[cfgs.seq_frames-2]*127).astype(np.uint8), (static_anno[cfgs.seq_frames-1]*127).astype(np.uint8), step, '_insect_inpt', if_more=True)
          
-            #self.view_flow_one(flow_inpt[0], fn, step, '_inpt')
+            self.view_flow_one(flow_inpt[0], fn, step, '_inpt')
             #self.view_flow_one(flow_no_inst[0], fn, step, '_no_inst')
             #self.view_flow_one(flow_insect[0], fn, step, '_insect')
-            #self.view_flow_one(flow[0], fn, step)
+            self.view_flow_one(flow[0], fn, step)
             #self.view_inst_mask_one((255-inst_mask*255).astype(np.uint8), fn, step)
     
 
