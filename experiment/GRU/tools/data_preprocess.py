@@ -23,6 +23,11 @@ def concat_data(flow, mask, grid):
 
     input_data = np.concatenate([flow, mask], axis=2)
 
-    return input_data
+    mask_sum = np.sum(np.where(mask>127.5, 1, 0))
+    flag = True
+    if mask_sum == 0:
+        flag = False
+
+    return input_data, flag
 
 

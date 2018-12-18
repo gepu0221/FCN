@@ -104,16 +104,19 @@ class SeqFCNNet(FCNNet):
         
         return 255 - im
 
-    def view_flow_one(self, flow, fn, step, a_str=''):
+    def view_flow_one(self, flow, fn, step, a_str='', f_path='train'):
         if cfgs.test_view:
             filename = fn
         else:
             filename = str(step)+'_'+fn
 
-        path_ = os.path.join(cfgs.view_path, 'train')
+        path_ = os.path.join(cfgs.view_path, f_path)
         color_flow = flowToColor(flow)
+        if cfgs.inpt_resize:
+            h, w = cfgs.IMAGE_SIZE
+            color_flow = cv2.resize(color_flow, (w, h), interpolation=cv2.INTER_CUBIC)
         #color_flow = med_flow_color(flow)
-        cv2.imwrite(os.path.join(path_, filename+'_flow_color%s.bmp' % a_str), color_flow)
+        cv2.imwrite(os.path.join(path_, filename+'_flow_%s.bmp' % a_str), color_flow)
         
  
     def view_inst_mask_one(self, inst_mask, fn, step, a_str=''):
@@ -136,83 +139,39 @@ class SeqFCNNet(FCNNet):
         
 
 
-    def view_one(self, fn, pred_anno, pred_pro, im, step, str_a='', if_more=True):
-        path_ = os.path.join(cfgs.view_path, 'train')
+    def view_one(self, fn, pred_anno, pred_pro, im, step, str_a='', if_more=True, f_path='train'):
+        path_ = os.path.join(cfgs.view_path, f_path)
         
         if cfgs.test_view:
             filename = fn
         else:
             filename = str(step)+'_'+fn
-
-        #pred_anno_im = (pred_anno*127).astype(np.uint8)
-        #pdb.set_trace()
+        h, w = cfgs.IMAGE_SIZE
         prev_warping = cv2.cvtColor(pred_anno.astype(np.uint8), cv2.COLOR_BGR2RGB)
-        #prev_warping = pred_anno
+        if cfgs.inpt_resize:
+            prev_warping = cv2.resize(prev_warping, (w, h), interpolation=cv2.INTER_CUBIC)
         cv2.imwrite(os.path.join(path_, filename+'_warp%s.bmp' % str_a), prev_warping)
 
         if if_more:
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-            cv2.imwrite(os.path.join(path_, filename+'_im%s.bmp' % str_a), im)
+            im = cv2.resize(im, (w, h), interpolation=cv2.INTER_CUBIC)
+            if cfgs.inpt_resize:
+                cv2.imwrite(os.path.join(path_, filename+'_im%s.bmp' % str_a), im)
             im_prev = cv2.cvtColor(pred_pro, cv2.COLOR_BGR2RGB)
+            if cfgs.inpt_resize:
+                im_prev = cv2.resize(im_prev, (w, h), interpolation=cv2.INTER_CUBIC)
             cv2.imwrite(os.path.join(path_, filename+'_im_prev%s.bmp' % str_a), im_prev)
-        
        
-            prev_diff = prev_warping - im_prev 
-            #cv2.imwrite(os.path.join(path_, filename+'_diff_pw%s.bmp' % str_a), prev_diff) 
-            prev_combined = im + (im_prev/2).astype(np.uint8)
-            #cv2.imwrite(os.path.join(path_, filename+'_com_cp%s.bmp' % str_a), prev_combined) 
-            prev_combined = im + (im_prev/2).astype(np.uint8) + (prev_warping/4).astype(np.uint8)
-            #cv2.imwrite(os.path.join(path_, filename+'_com_all%s.bmp' % str_a), prev_combined) 
-            warp_combined = im + (prev_warping/2).astype(np.uint8)
-            #cv2.imwrite(os.path.join(path_, filename+'_com_cw%s.bmp' % str_a), warp_combined) 
-            prev_warp_combined = im_prev + (prev_warping/2).astype(np.uint8)
-            #cv2.imwrite(os.path.join(path_, filename+'_com_pw%s.bmp' % str_a), prev_warp_combined) 
-
-
-        if cfgs.view_seq:
-            for i in range(cfgs.seq_num):
-                im_ = im[:,:,self.cur_channel-1+i]
-                cv2.imwrite(os.path.join(path_, filename+'seq_'+str(i+1)+'.bmp'), im_)
-            
-    def view(self, fns, pred_annos, pred_pros, ims, step, str_a='', if_more=True):
-        num_ = fns.shape[0]
-        #pdb.set_trace()
-        if cfgs.random_view:
-            choosen = random.randint(0, num_-1)
-            self.view_one(fns[choosen], pred_annos[choosen], pred_pros[choosen], ims[choosen], step, str_a, if_more)
-        else:
-            for i in range(num_):
-                self.view_one(fns[i], pred_annos[i], pred_pros[i], ims[i], step, str_a, if_mo4e)   
-
-    def view_one_valid(self, fn, pred_anno, pred_pro, im, step):
-        path_ = os.path.join(cfgs.view_path, 'valid')
-        if cfgs.test_view:
-            filename = fn.strip().decode('utf-8')
-        else:
-            filename = str(step)+'_'+fn.strip().decode('utf-8')
-        pred_anno_im = (pred_anno*127).astype(np.uint8)
-        cv2.imwrite(os.path.join(path_, filename+'_anno.bmp'), pred_anno_im)
-        cv2.imwrite(os.path.join(path_, filename+'_im.bmp'), im[:,:,0])
-        heatmap1 = density_heatmap(pred_pro[:,:,1])
-        cv2.imwrite(os.path.join(path_, filename+'_heat1.bmp'), heatmap1)
-        heatmap2 = density_heatmap(pred_pro[:,:,2])
-        cv2.imwrite(os.path.join(path_, filename+'_heat2.bmp'), heatmap2)
-
-        if cfgs.view_seq:
-            for i in range(cfgs.seq_num):
-                im_ = im[:,:,self.cur_channel-1+i]
-                cv2.imwrite(os.path.join(path_, filename+'seq_'+str(i+1)+'.bmp'), im_)
-            
-    def view_valid(self, fns, pred_annos, pred_pros, ims, step):
+    def view(self, fns, pred_annos, pred_pros, ims, step, str_a='', if_more=True, f_path='train'):
         num_ = fns.shape[0]
         if cfgs.random_view:
             choosen = random.randint(0, num_-1)
-            self.view_one_valid(fns[choosen], pred_annos[choosen], pred_pros[choosen], ims[choosen], step)
+            self.view_one(fns[choosen], pred_annos[choosen], pred_pros[choosen], ims[choosen], step, str_a, if_more, f_path)
         else:
             for i in range(num_):
-                self.view_one_valid(fns[i], pred_annos[i], pred_pros[i], ims[i], step)   
+                self.view_one(fns[i], pred_annos[i], pred_pros[i], ims[i], step, str_a, if_more, f_path)   
 
-    
+        
     def persist_cornea(self):
         '''
             remove the part of instrutment and background to persist cornea part.
@@ -329,13 +288,18 @@ class SeqFCNNet(FCNNet):
         
         batch_raw, masks_raw = tf.split(self.inpt_data, 2, axis=2)
         mask = tf.cast(masks_raw[0:1, :, :, 0:2] > 127.5, tf.float32)
-        paddings = tf.constant([[0, 0], [0, 4], [0, 0], [0, 0]])
+        paddings = tf.constant([[0, 0], [0, cfgs.grid_padding], [0, 0], [0, 0]])
         mask = tf.pad(mask, paddings, 'CONSTANT')
 
-        self.flow_loss = tf.reduce_mean(tf.abs(self.ori_flow - self.inpt_pred_flow) * mask)
-        self.flow_loss = tf.where(tf.equal(tf.reduce_mean(mask), 0.), 0., self.flow_loss/tf.reduce_mean(mask))
-        #self.flow_loss /= tf.reduce_mean(mask)
-        #self.loss = self.im_warp_loss + self.flow_loss
+        #self.flow_loss = tf.reduce_mean(tf.abs(self.ori_flow - self.inpt_pred_flow) * mask)
+        #self.flow_loss = tf.where(tf.equal(tf.reduce_mean(mask), 0.), 0., self.flow_loss/tf.reduce_mean(mask))
+        self.mask_sum = tf.reduce_sum(mask)
+        self.flow_loss = tf.reduce_sum(tf.abs(self.ori_flow - self.inpt_pred_flow) * mask) / self.mask_sum
+
+        #Use prediction complete flow to caculate loss.
+        self.complete_flow_loss = tf.reduce_mean(tf.abs(self.ori_flow - self.pred_complete_flow))
+
+        #self.loss = self.complete_flow_loss
         self.loss = self.flow_loss
 
 
@@ -348,16 +312,10 @@ class SeqFCNNet(FCNNet):
             data_loader: training or validation data_loader.
             data_num: number of data.
         '''
-        sum_acc = 0
-        sum_acc_iou = 0
-        sum_acc_ellip = 0
+        sum_acc, sum_acc_iou, sum_acc_ellip, total_loss = 0, 0, 0, 0
         count = 0
-        total_loss = 0
         t0 =time.time()
-        mean_acc = 0
-        mean_acc_iou = 0
-        mean_acc_label = 0
-        mean_acc_ellip = 0
+        mean_acc, mean_acc_iou, mean_acc_label, mean_acc_ellip = 0, 0, 0, 0
         
         self.ellip_acc, self.accu, self.accu_iou, loss = 0, 0, 0, 0
 
@@ -365,7 +323,7 @@ class SeqFCNNet(FCNNet):
         for count in range(1, data_num):
             step += 1
             
-            images, images_da, mask, fn, flag = data_loader.get_next_sequence()
+            images, images_da, mask, fn, flag, mask_sum = data_loader.get_next_sequence()
             if flag == False:
                 print(fn)
                 # Can't find prev data.
@@ -385,10 +343,16 @@ class SeqFCNNet(FCNNet):
                 
 
             normal_flow, normal_max_v = normal_data(flow)
-            inpt_input = concat_data(normal_flow, mask, cfgs.grid)
-            
-            _, loss, inpt_warped_im, inpt_flow =sess.run([self.opt, self.loss, \
-                                        self.inpt_warped_im, self.inpt_pred_flow],\
+            inpt_input, flag_ = concat_data(normal_flow, mask, cfgs.grid)
+            if flag_ == False:
+                print(fn)
+                #After grid, area of mask = 0
+                continue
+
+
+            _, loss, inpt_warped_im, inpt_flow, pred_flow, \
+             =sess.run([self.opt, self.loss, \
+                                        self.inpt_warped_im, self.inpt_pred_flow, self.pred_complete_flow],\
                                                feed_dict={self.flow_img1: last_im,
                                                           self.flow_img0: im,
                                                           self.ori_flow: flow,
@@ -401,8 +365,9 @@ class SeqFCNNet(FCNNet):
             
 
                 self.view_flow_one(flow[0], fn, step)
-                self.view_flow_one(inpt_flow[0], fn, step, '_inpt')
-                self.view_flow_one(flow_da[0], fn, step, '_da')
+                self.view_flow_one(pred_flow[0], fn, step, 'complete')
+                self.view_flow_one(inpt_flow[0], fn, step, 'inpt')
+                self.view_flow_one(flow_da[0], fn, step, 'da')
 
 
             
@@ -424,14 +389,109 @@ class SeqFCNNet(FCNNet):
             time_per_batch = time_consumed/count
 
             #5. print
-            line = 'Train epoch %2d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t m_loss=%.4f\t  max_v = %.2f\t fn = %s\t time = %.2f' % (epoch, self.learning_rate, step, count, loss, (total_loss/count), normal_max_v, fn, time_per_batch)
-            #utils.clear_line(len(line))
-            #print('\r' + line, end='')
-            print(line)
+            line = 'Train epoch %2d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t m_loss=%.4f\t  max_v = %.2f\t fn = %s\t  time = %.2f' % (epoch, cfgs.inpt_lr, step, count, loss, (total_loss/count), normal_max_v, fn, time_per_batch)
+            utils.clear_line(len(line))
+            print('\r' + line, end='')
 
         #End one epoch
         #count -= 1
-        print('\nepoch %5d\t learning_rate = %g\t mean_loss = %.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, self.learning_rate, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
+        print('\nepoch %5d\t learning_rate = %g\t mean_loss = %.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, cfgs.inpt_lr, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
+        print('Take time %3.1f' % (time.time() - t0))
+
+
+        return step
+    
+    
+    def valid_one_epoch(self, sess, data_loader, data_num, epoch, step):
+        
+        '''
+        Generate once of image which remove instruments.
+        Args:
+            data_loader: training or validation data_loader.
+            data_num: number of data.
+        '''
+        sum_acc, sum_acc_iou, sum_acc_ellip, total_loss = 0, 0, 0, 0
+        count = 0
+        t0 =time.time()
+        mean_acc, mean_acc_iou, mean_acc_label, mean_acc_ellip = 0, 0, 0, 0
+        self.ellip_acc, self.accu, self.accu_iou, loss = 0, 0, 0, 0
+
+
+        for count in range(1, data_num):
+            step += 1
+            
+            images, images_da, mask, fn, flag, mask_sum = data_loader.get_next_sequence()
+            if flag == False:
+                print(fn)
+                # Can't find prev data.
+                continue
+            # Origin optical flow
+            for frame in range(1, cfgs.seq_frames):
+                im, last_im = images[frame], images[frame-1]
+                flow = sess.run(self.flow_tensor,
+                                feed_dict={self.flow_img0: im,
+                                           self.flow_img1: last_im})
+            # Da optical flow
+            for frame in range(1, cfgs.seq_frames):
+                im, last_im = images_da[frame], images_da[frame-1]
+                flow_da = sess.run(self.flow_tensor,
+                                feed_dict={self.flow_img0: im,
+                                           self.flow_img1: last_im})
+                
+
+            normal_flow, normal_max_v = normal_data(flow)
+            inpt_input, flag_ = concat_data(normal_flow, mask, cfgs.grid)
+            if flag_ == False:
+                print(fn)
+                #After grid, area of mask = 0
+                continue
+
+
+            
+            loss, inpt_warped_im, inpt_flow, pred_flow =sess.run([self.loss, \
+                                        self.inpt_warped_im, self.inpt_pred_flow, self.pred_complete_flow],\
+                                               feed_dict={self.flow_img1: last_im,
+                                                          self.flow_img0: im,
+                                                          self.ori_flow: flow,
+                                                          self.max_v: normal_max_v,
+                                                          self.inpt_data: inpt_input})
+            #if count % 20 == 0:
+            if True:
+                self.view(np.expand_dims(fn, 0), inpt_warped_im, images_da[cfgs.seq_frames-2], images_da[cfgs.seq_frames-1], step, f_path='valid')
+            
+
+                self.view_flow_one(flow[0], fn, step, f_path='valid')
+                self.view_flow_one(inpt_flow[0], fn, step, '_inpt', 'valid')
+                self.view_flow_one(flow_da[0], fn, step, '_da', 'valid')
+                self.view_flow_one(pred_flow[0], fn, step, 'complete', f_path='valid')
+
+
+            
+
+
+            #2. calculate accurary
+            self.ellip_acc = 0
+            sum_acc += self.accu
+            sum_acc_iou += self.accu_iou
+            sum_acc_ellip += self.ellip_acc
+            mean_acc = sum_acc/count
+            mean_acc_iou = sum_acc_iou/count
+            mean_acc_ellip = sum_acc_ellip/count
+            #3. calculate loss
+            total_loss += loss
+
+            #4. time consume
+            time_consumed = time.time() - t0
+            time_per_batch = time_consumed/count
+
+            #5. print
+            line = 'Valid epoch %2d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t m_loss=%.4f\t  max_v = %.2f\t fn = %s\t time = %.2f' % (epoch, cfgs.inpt_lr, step, count, loss, (total_loss/count), normal_max_v, fn, time_per_batch)
+            utils.clear_line(len(line))
+            print('\r' + line, end='')
+
+        #End one epoch
+        #count -= 1
+        print('\nepoch %5d\t learning_rate = %g\t mean_loss = %.4f\t train_acc = %.2f%%\t train_iou_acc = %.2f%%\t train_ellip_acc = %.2f' % (epoch, cfgs.inpt_lr, (total_loss/count), (sum_acc/count), (sum_acc_iou/count), (sum_acc_ellip/count)))
         print('Take time %3.1f' % (time.time() - t0))
 
 

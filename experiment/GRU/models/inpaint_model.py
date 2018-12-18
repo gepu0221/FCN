@@ -67,7 +67,6 @@ class InpaintModel():
         # generate mask, 1 represents masked point
         batch_raw, masks_raw = tf.split(batch_data, 2, axis=2)
         mask = tf.cast(masks_raw[0:1, :, :, 0:1] > 127.5, tf.float32)
-        self.mask = mask
 
         batch_pos = batch_raw
 
@@ -81,6 +80,6 @@ class InpaintModel():
         g_vars = tf.get_collection(
             tf.GraphKeys.TRAINABLE_VARIABLES, 'inpaint_net')
 
-        return g_vars, batch_complete
+        return g_vars, batch_complete, batch_predicted
         
         

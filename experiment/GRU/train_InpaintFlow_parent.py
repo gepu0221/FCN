@@ -98,14 +98,18 @@ class U_Net(object):
         #3. Init flow-inpaint net
         config = Config('cfgs/inpaint.yml')
         # [-1, 1]?
-        self.inpt_data = tf.placeholder(shape=[None, cfgs.IMAGE_SIZE[0]-4, cfgs.IMAGE_SIZE[1]*2, cfgs.inpt_in_channel], dtype=tf.float32)
+        #self.inpt_data = tf.placeholder(shape=[None, cfgs.IMAGE_SIZE[0]-4, cfgs.IMAGE_SIZE[1]*2, cfgs.inpt_in_channel], dtype=tf.float32)
+        self.inpt_data = tf.placeholder(shape=[None, cfgs.inpt_resize_im_sz[0], cfgs.inpt_resize_im_sz[1]*2, cfgs.inpt_in_channel], dtype=tf.float32)
         self.max_v = tf.placeholder(tf.float32)
         self.inpt_network = InpaintModel()
-        self.inpt_g_vars, self.inpt_pred_flow = self.inpt_network.build_graph(
+        self.inpt_g_vars, self.inpt_pred_flow, self.pred_complete_flow = self.inpt_network.build_graph(
             self.inpt_data, config=config)
         self.inpt_pred_flow = self.inpt_pred_flow * self.max_v
-        paddings = tf.constant([[0, 0], [0, 4], [0, 0], [0, 0]])
+        self.pred_complete_flow *= self.max_v
+        paddings = tf.constant([[0, 0], [0, cfgs.grid_padding], [0, 0], [0, 0]])
         self.inpt_pred_flow = tf.pad(self.inpt_pred_flow, paddings, 'CONSTANT')
+        self.pred_complete_flow = tf.pad(self.pred_complete_flow, paddings, 'CONSTANT')
+
       
 
 
@@ -118,8 +122,8 @@ class U_Net(object):
     def train_optimizer(self):
 
         
-        #optimizer = tf.train.AdamOptimizer(cfgs.inpt_lr, beta1=0.5, beta2=0.9)
-        optimizer = tf.train.AdamOptimizer(cfgs.inpt_lr)
+        optimizer = tf.train.AdamOptimizer(cfgs.inpt_lr, beta1=0.5, beta2=0.9)
+        #optimizer = tf.train.AdamOptimizer(cfgs.inpt_lr)
 
         var_list = tf.trainable_variables()
 
@@ -396,49 +400,14 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
-                    #for train_sub_flow
-                    #step = self.train_one_epoch_remv_occ(sess, self.train_dl, cfgs.train_num, epoch, step)
-                    #step = self.train_one_epoch_remv_occ_segm(sess, self.train_dl, cfgs.train_num, epoch, step)
-                    #step = self.train_one_epoch_warp_inpt_flow(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    #step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
 
-                    #self.warp_one_im(sess, step)
                     
                     #3.3 save model
-                    #self.valid_once(sess, self.valid_dl, cfgs.valid_num, epoch, step)
+                    self.valid_one_epoch(sess, self.valid_dl, cfgs.valid_num, epoch, step)
                     self.cur_epoch.load(epoch, sess)
                     self.current_itr_var.load(step, sess)
                     saver.save(sess, cfgs.gru_logs_dir + 'model.ckpt', step)
 
-        writer.close()
 
-    def vis(self):
-        if not os.path.exists(self.logs_dir):
-            raise Exception('The logs path %s is not found!' % self.logs_dir)
-
-        print('The logs path is %s.' % self.logs_dir)
-        config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
-        with tf.device('/gpu:0'):
-            with tf.Session(config=config) as sess:
-                sess.run(tf.global_variables_initializer())
-
-                saver = self.recover_model(sess)
-
-                self.visualize(sess)
-
-
-    def vis_video(self):
-        if not os.path.exists(self.logs_dir):
-            raise Exception('The logs path %s is not found!' % self.logs_dir)
-
-        print('The logs path is %s.' % self.logs_dir)
-        config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
-        with tf.device('/gpu:0'):
-            with tf.Session(config=config) as sess:
-                sess.run(tf.global_variables_initializer())
-
-                saver = self.recover_model(sess)
-
-                self.vis_video_once(sess)
-
-
+    

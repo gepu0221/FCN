@@ -6,6 +6,7 @@ pickle_save_path = '/home/gp/repos/FCN/experiment/GRU/data/inpt_flow_dilate_pick
 checkpoint_dir = 'model_logs/Places2'
 
 batch_size = 1
-IMAGE_SIZE = [536, 1920]
+#IMAGE_SIZE = [536, 1920]
+IMAGE_SIZE = [256, 512]
 channel = 3
 
