@@ -18,7 +18,7 @@ from tools.config import Config
 import shutil
 #Pretrain model
 from tensorflow.python.framework import ops
-from DataLoader_corean_inpt_da import DataLoader_c
+from DataLoader_corean_inpt_da_sdm import DataLoader_c
 #from DataLoader_corean_inpt import DataLoader_c
 from models.stgru import STGRU
 from models.flownet2 import Flownet2
@@ -400,7 +400,7 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    #step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
 
                     
                     #3.3 save model

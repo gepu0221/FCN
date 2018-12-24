@@ -324,13 +324,11 @@ class SeqFCNNet(FCNNet):
         self.sd_mask = tf.placeholder(tf.float32)
         local_patch_inpt_flow = local_patch(self.inpt_pred_flow, self.rect_param)
         local_patch_ori_flow = local_patch(self.ori_flow, self.rect_param)
-        self.l_inpt_patch = local_patch_inpt_flow
-        self.l_ori_patch = local_patch_ori_flow
+        self.local_patch_inpt_flow = local_patch_inpt_flow
 
-        self.patch_im = local_patch(self.flow_img0, self.rect_param)
 
-        #self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow) * self.sd_mask)
-        self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
+        self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow) * self.sd_mask)
+        #self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
 
         self.flow_loss_ = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
 
@@ -417,10 +415,8 @@ class SeqFCNNet(FCNNet):
             
             t_count += 1
             _, loss, im_warp_loss, flow_loss, \
-            l_inpt_p, l_ori_p, im_p, \
             inpt_warped_im, inpt_flow, pred_flow, \
              =sess.run([self.opt, self.loss, self.im_warp_loss, self.flow_loss_, \
-                        self.l_inpt_patch, self.l_ori_patch, self.patch_im,\
                                         self.inpt_warped_im, self.inpt_pred_flow, self.pred_complete_flow],\
                                                feed_dict={self.flow_img1: last_im,
                                                           self.flow_img0: im,
@@ -430,20 +426,14 @@ class SeqFCNNet(FCNNet):
                                                           self.sd_mask: sd_mask,
                                                           self.rect_param: rect_param})
             
-            #cv2.imwrite('l.bmp', l_inpt_p)
-            #cv2.imwrite('l_ori_p.bmp', l_ori_p)
             
-            if True:
-            #if count % 50 == 0:
+            if count % 50 == 0:
                 self.view(np.expand_dims(fn, 0), inpt_warped_im, images[cfgs.seq_frames-2], images[cfgs.seq_frames-1], step)
                 self.view(np.expand_dims(fn, 0), inpt_warped_im, images_da[cfgs.seq_frames-2], images_da[cfgs.seq_frames-1], step), '_da'
-                self.view_patch_one(im_p[0], fn, step, 'im_patch')
-                #self.view_flow_patch_one(l_inpt_p[0], fn, step, 'l_p')
-                #self.view_flow_patch_one(l_ori_p[0], fn, step, 'o_p')
-                #self.view_flow_one(flow[0], fn, step)
-                #self.view_flow_one(pred_flow[0], fn, step, 'complete')
-                #self.view_flow_one(inpt_flow[0], fn, step, 'inpt')
-                #self.view_flow_one(flow_da[0], fn, step, 'da')
+                self.view_flow_one(flow[0], fn, step)
+                self.view_flow_one(pred_flow[0], fn, step, 'complete')
+                self.view_flow_one(inpt_flow[0], fn, step, 'inpt')
+                self.view_flow_one(flow_da[0], fn, step, 'da')
             #3. calculate loss
             total_loss += loss
             total_im_warp_loss += im_warp_loss
@@ -519,8 +509,10 @@ class SeqFCNNet(FCNNet):
 
             t_count += 1   
             loss, im_warp_loss, flow_loss,\
+            l_inpt_p, \
             inpt_warped_im, inpt_flow, pred_flow \
             =sess.run([self.loss, self.im_warp_loss, self.flow_loss_,\
+                       self.local_patch_inpt_flow, \
                        self.inpt_warped_im, self.inpt_pred_flow, self.pred_complete_flow],\
                                                feed_dict={self.flow_img1: last_im,
                                                           self.flow_img0: im,
@@ -533,7 +525,7 @@ class SeqFCNNet(FCNNet):
             #if True:
                 self.view(np.expand_dims(fn, 0), inpt_warped_im, images_da[cfgs.seq_frames-2], images_da[cfgs.seq_frames-1], step, f_path='valid')
             
-
+                #self.view_flow_patch_one(l_inpt_p[0], fn, step, 'l_inpt_p', f_path='valid')
                 self.view_flow_one(flow[0], fn, step, f_path='valid')
                 self.view_flow_one(inpt_flow[0], fn, step, '_inpt', 'valid')
                 self.view_flow_one(flow_da[0], fn, step, '_da', 'valid')
