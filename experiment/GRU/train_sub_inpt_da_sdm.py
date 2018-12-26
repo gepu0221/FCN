@@ -177,7 +177,7 @@ class SeqFCNNet(FCNNet):
         if cfgs.inpt_resize:
             prev_warping = cv2.resize(prev_warping, (w, h), interpolation=cv2.INTER_CUBIC)
         cv2.imwrite(os.path.join(path_, filename+'_warp%s.bmp' % str_a), prev_warping)
-
+        '''
         if if_more:
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
             im = cv2.resize(im, (w, h), interpolation=cv2.INTER_CUBIC)
@@ -187,7 +187,7 @@ class SeqFCNNet(FCNNet):
             if cfgs.inpt_resize:
                 im_prev = cv2.resize(im_prev, (w, h), interpolation=cv2.INTER_CUBIC)
             cv2.imwrite(os.path.join(path_, filename+'_im_prev%s.bmp' % str_a), im_prev)
-       
+        '''
     def view(self, fns, pred_annos, pred_pros, ims, step, str_a='', if_more=True, f_path='train'):
         num_ = fns.shape[0]
         if cfgs.random_view:
@@ -288,23 +288,8 @@ class SeqFCNNet(FCNNet):
         self.no_inst_warped_segm = self.bilinear_warping_module.bilinear_warping(self.flow_segm, self.flow_comb)
         self.no_inst_warped_segm = tf.expand_dims(tf.argmax(tf.nn.softmax(self.no_inst_warped_segm), dimension=3), axis=3)
     
-    def flow_warp(self):
-        
-        self.flow_warp_img0 = tf.placeholder(tf.float32)
-        self.flow_warp_img1 = tf.placeholder(tf.float32)
+       
 
-        self.warp_flow = tf.placeholder(tf.float32)
-        
-        self.result_warped_segm = self.bilinear_warping_module.bilinear_warping(self.flow_warp_img1, self.warp_flow)
-        self.result_warped = tf.expand_dims(tf.argmax(tf.nn.softmax(self.result_warped_segm), dimension=3), axis=3)
-    
-        sz = [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 1]
-        comp = tf.ones(sz, dtype=tf.float32)
-        anno_img0 = tf.expand_dims(tf.argmax(tf.nn.softmax(self.flow_warp_img0), dimension=3), axis=3)
-        anno_img0 = tf.cast(anno_img0 / 2, tf.int32)
-        insect_area = tf.cast((tf.multiply(self.result_warped, tf.cast(comp-self.flow_inst_mask, tf.int64))) / 2, tf.int32)
-
-        self.insect_result_warped = insect_area + anno_img0
 
     def loss(self):
         
@@ -521,15 +506,15 @@ class SeqFCNNet(FCNNet):
                                                           self.inpt_data: inpt_input,
                                                           self.sd_mask: sd_mask,
                                                           self.rect_param: rect_param})
-            if count % 20 == 0:
-            #if True:
+            #if count % 20 == 0:
+            if True:
                 self.view(np.expand_dims(fn, 0), inpt_warped_im, images_da[cfgs.seq_frames-2], images_da[cfgs.seq_frames-1], step, f_path='valid')
             
                 #self.view_flow_patch_one(l_inpt_p[0], fn, step, 'l_inpt_p', f_path='valid')
-                self.view_flow_one(flow[0], fn, step, f_path='valid')
-                self.view_flow_one(inpt_flow[0], fn, step, '_inpt', 'valid')
-                self.view_flow_one(flow_da[0], fn, step, '_da', 'valid')
-                self.view_flow_one(pred_flow[0], fn, step, 'complete', f_path='valid')
+                #self.view_flow_one(flow[0], fn, step, f_path='valid')
+                #self.view_flow_one(inpt_flow[0], fn, step, '_inpt', 'valid')
+                #self.view_flow_one(flow_da[0], fn, step, '_da', 'valid')
+                #self.view_flow_one(pred_flow[0], fn, step, 'complete', f_path='valid')
 
 
             

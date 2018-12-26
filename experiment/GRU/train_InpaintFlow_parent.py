@@ -300,7 +300,7 @@ class U_Net(object):
     #10. Model recover
     def return_saver_ckpt(self, sess, logs_dir, var_list):
     
-        saver = tf.train.Saver(var_list)
+        saver = tf.train.Saver(var_list, max_to_keep=30)
         ckpt = tf.train.get_checkpoint_state(logs_dir)
         if ckpt and ckpt.model_checkpoint_path:
             saver.restore(sess, ckpt.model_checkpoint_path)
@@ -400,7 +400,8 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    #step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    self.valid_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
 
                     
                     #3.3 save model
