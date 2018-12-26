@@ -5,9 +5,8 @@ from easydict import EasyDict as edict
 cfgs = edict()
 #1. path
 #1.1 Image path
-cfgs.image_path = '/home/gp/repos/FCN/experiment/data_process/s8_video_part/'
-#cfgs.image_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_video_label2_ori3_Occ1204'
-cfgs.da_im_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/inst_da1213'
+cfgs.image_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/s8_video_part_3000_noInst'
+cfgs.da_im_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/data1222/rect_inst_da'
 
 #1.2 Label path
 #Remove occulded area labels fine-tune labels.
@@ -15,10 +14,8 @@ cfgs.train_anno_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_part_
 cfgs.val_anno_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_part_video_gtFine3_inter6_1206/val'
 
 # inpainting flow mask path
-cfgs.train_mask_path = '/home/gp/repos/FCN/experiment/GRU/view/s8_gru_flow_mask_dilate1210/train'
-cfgs.val_mask_path = '/home/gp/repos/FCN/experiment/GRU/view/s8_gru_flow_mask_dilate1210/valid'
-
-
+cfgs.train_mask_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/data1222/rect_inst_da_mask/train'
+cfgs.val_mask_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/data1222/rect_inst_da_mask/val'
 
 # Load inpainting flow pickle.
 cfgs.inpt_flow_pickle = '/home/gp/repos/FCN/experiment/GRU/data/inpt_flow_dilate_pickle'
@@ -28,11 +25,15 @@ cfgs.inpt_flow_pickle = '/home/gp/repos/FCN/experiment/GRU/data/inpt_flow_dilate
 cfgs.unet_logs_dir = '/home/gp/repos/FCN/experiment/weakly_supervised/logs/logs_s8ori3_noOcculde_label2_1116/'
 cfgs.flow_logs_dir = 'logs/flow/'
 cfgs.flow_logs_name = 'flownet2'
-cfgs.gru_logs_dir = 'logs/s8_inpt_flow_1214/'
+#I 10: inter 10
+#rsz: resize
+#warpAdd: add warp loss to loss function
+cfgs.gru_logs_dir = 'logs/s8_inpt_RectInstDa_I10_rsz256_WarpAdd02_EPDsdm_1226/'
+
 
 #1.4 Others
 #cfgs.view_path = 'view/s8_gru_flow_inpt_warp1210'
-cfgs.view_path = 'view_inpt/s8_inpt1214'
+cfgs.view_path = 'view_inpt/s8_RectInptDa_I10_rsz256_WarpAdd02_EPDsdm_1226'
 cfgs.pickle_path = 'data/flow_dilate_pickle'
 
 #2. unet param
@@ -57,11 +58,11 @@ cfgs.MODEL_NAME = "imagenet-resnet-101-dag.mat"
 cfgs.result_dir = 'result/'
 cfgs.debug = 'False'
 cfgs.mode = 'train'
-cfgs.max_epochs = 26
+cfgs.max_epochs = 51
 cfgs.NUM_OF_CLASSESS = 3
-#cfgs.ANNO_IMAGE_SIZE = [540, 960]
-#cfgs.RESIZE_IMAGE_SIZE = [540, 960]
-cfgs.IMAGE_SIZE = [540, 960]
+
+cfgs.IMAGE_SIZE = [270, 480]
+#cfgs.IMAGE_SIZE = [540, 960]
 cfgs.if_pad = [False, False, True, True]
 cfgs.pad_num_w = 0
 cfgs.pad_num_h = 1
@@ -86,13 +87,13 @@ cfgs.inst_low_pro = 0
 
 #3. GRU
 cfgs.grfp_lr = 2e-5
-cfgs.train_num = 873
-cfgs.valid_num = 97
+cfgs.train_num = 2154
+cfgs.valid_num = 239
 #----
 cfgs.seq_frames = 2
 cfgs.nbr_frames = 2
 #----
-cfgs.inter = 6
+cfgs.inter = 10
 cfgs.frame = 10617
 #---
 cfgs.if_dilate = True
@@ -102,6 +103,13 @@ cfgs.dilate_num = 5
 cfgs.inpt_lr = 1e-4
 cfgs.inpt_in_channel = 2
 cfgs.grid = 8
+cfgs.grid_padding = 0
+cfgs.inpt_resize_im_sz = [256, 256]
+cfgs.inpt_resize = True
+cfgs.w_warp_loss = 0.2
+cfgs.gamma = 0.9
+cfgs.epd_ratio = 3
+
 
 #5. vis choices
 cfgs.anno = True

@@ -6,19 +6,11 @@ cfgs = edict()
 #1. path
 #1.1 Image path
 cfgs.image_path = '/home/gp/repos/FCN/experiment/data_process/s8_video_part/'
-#cfgs.image_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_video_label2_ori3_Occ1204'
-cfgs.da_im_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/inst_da1213'
+
 
 #1.2 Label path
-#Remove occulded area labels fine-tune labels.
 cfgs.train_anno_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_part_video_gtFine3_inter6_1206/train'
 cfgs.val_anno_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_part_video_gtFine3_inter6_1206/val'
-
-# inpainting flow mask path
-cfgs.train_mask_path = '/home/gp/repos/FCN/experiment/GRU/view/s8_gru_flow_mask_dilate1210/train'
-cfgs.val_mask_path = '/home/gp/repos/FCN/experiment/GRU/view/s8_gru_flow_mask_dilate1210/valid'
-
-
 
 # Load inpainting flow pickle.
 cfgs.inpt_flow_pickle = '/home/gp/repos/FCN/experiment/GRU/data/inpt_flow_dilate_pickle'
@@ -28,14 +20,15 @@ cfgs.inpt_flow_pickle = '/home/gp/repos/FCN/experiment/GRU/data/inpt_flow_dilate
 cfgs.unet_logs_dir = '/home/gp/repos/FCN/experiment/weakly_supervised/logs/logs_s8ori3_noOcculde_label2_1116/'
 cfgs.flow_logs_dir = 'logs/flow/'
 cfgs.flow_logs_name = 'flownet2'
-cfgs.gru_logs_dir = 'logs/s8_inpt_flow_1214/'
+cfgs.gru_logs_dir = 'logs/gru_nouse_1208/'
 
 #1.4 Others
-#cfgs.view_path = 'view/s8_gru_flow_inpt_warp1210'
-cfgs.view_path = 'view_inpt/s8_inpt1214'
+cfgs.view_path = 'view/s8_gru_flow_inpt_insect1211'
 cfgs.pickle_path = 'data/flow_dilate_pickle'
 
-#2. unet param
+#2. inpainting
+
+#3. param
 cfgs.class_convs_num = 2 
 cfgs.p_k_sz = [3, 4] 
 
@@ -57,7 +50,7 @@ cfgs.MODEL_NAME = "imagenet-resnet-101-dag.mat"
 cfgs.result_dir = 'result/'
 cfgs.debug = 'False'
 cfgs.mode = 'train'
-cfgs.max_epochs = 26
+cfgs.max_epochs = 2
 cfgs.NUM_OF_CLASSESS = 3
 #cfgs.ANNO_IMAGE_SIZE = [540, 960]
 #cfgs.RESIZE_IMAGE_SIZE = [540, 960]
@@ -70,14 +63,6 @@ cfgs.pad_num_h = 1
 #cfgs.mean_pixel = np.array([103.939, 116.779, 123.68, 0,0,0,0,0,0,0,0,0,0])
 cfgs.mean_pixel = np.array([103.939, 116.779, 123.68])
 
-#center_loss
-#cfgs.center_w = 0.00001
-cfgs.center_w = 0.00001
-cfgs.dis_w = 0.0002
-
-#focal
-cfgs.at = 0.25
-cfgs.gamma = 2
 
 #lower probability
 cfgs.low_pro = 0.5
@@ -98,12 +83,9 @@ cfgs.frame = 10617
 cfgs.if_dilate = True
 cfgs.dilate_num = 5
 
-#4. Inpainting
-cfgs.inpt_lr = 1e-4
-cfgs.inpt_in_channel = 2
-cfgs.grid = 8
 
-#5. vis choices
+
+#4. vis choices
 cfgs.anno = True
 cfgs.heatmap = False
 cfgs.trans_heat = True
