@@ -101,12 +101,12 @@ class U_Net_gp(object):
         scope_name = 'down_conv_%s' % name
         with tf.name_scope(scope_name):
             part1_name = '%s_part1' % scope_name
-            with tf.variable_scope(part1_name):
+            with tf.variable_scope(part1_name, reuse=tf.AUTO_REUSE):
                 w1_shape = [fz, fz, in_ch, out_ch]
                 tmp_h_conv = conv2d_layer(x, '1', w1_shape, pool_=0, if_relu=True, stride=1, stddev=stddev, keep_prob_=keep_prob_)
 
             part2_name = '%s_part2' % scope_name
-            with tf.variable_scope(part2_name):
+            with tf.variable_scope(part2_name, reuse=tf.AUTO_REUSE):
                 w2_shape = [fz, fz, out_ch, out_ch]
                 dw_h_conv = conv2d_layer(tmp_h_conv, '2', w2_shape, pool_=0, if_relu=True, stride=1, stddev=stddev, keep_prob_=keep_prob_)
                 
@@ -119,19 +119,19 @@ class U_Net_gp(object):
         scope_name = 'up_conv_%s' % name
         with tf.name_scope(scope_name):
             name = '%s_concat' % scope_name
-            with tf.variable_scope(name):
+            with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
                 # Deconv [k_sz, k_sz, out_ch, in_ch]
                 concat_w_shape = [pool_sz, pool_sz, f_ch // 2, f_ch]
                 h_deconv_concat = deconv2d_layer_concat(x, name, concat_w_shape, concat_x, output_shape=None, stride=pool_sz, if_relu=True)
             
             part1_name = '%s_part1' % scope_name
-            with tf.variable_scope(part1_name):
+            with tf.variable_scope(part1_name, reuse=tf.AUTO_REUSE):
                 #Number of channels is half for output.
                 w1_shape = [fz, fz, f_ch, f_ch // 2]
                 conv1 = conv2d_layer(h_deconv_concat, '1', w1_shape, pool_=0, if_relu=True, stride=1, stddev=stddev, keep_prob_=keep_prob_)
             
             part2_name = '%s_part2' % scope_name
-            with tf.variable_scope(part2_name):
+            with tf.variable_scope(part2_name, reuse=tf.AUTO_REUSE):
                 #Number of channels is invariant.
                 w2_shape = [fz, fz, f_ch // 2, f_ch // 2]
                 conv2 = conv2d_layer(conv1, '2', w2_shape, pool_=0, if_relu=True, stride=1, stddev=stddev, if_dropout=if_dropout, keep_prob_=keep_prob_)
@@ -189,7 +189,7 @@ class U_Net_gp(object):
             
         #3. output map
         with tf.name_scope('output_map'):
-            with tf.variable_scope('out_map'):
+            with tf.variable_scope('out_map', reuse=tf.AUTO_REUSE):
                 w_shape = [1, 1, features_root, n_class]
                 name = 'output'
                 output_map = conv2d_layer(x, name, w_shape, pool_=0, if_relu=True, stride=1, stddev=stddev, if_dropout=True, keep_prob_=keep_prob_)
