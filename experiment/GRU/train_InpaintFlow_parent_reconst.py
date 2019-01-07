@@ -18,7 +18,7 @@ from tools.config import Config
 import shutil
 #Pretrain model
 from tensorflow.python.framework import ops
-from DataLoader_corean_inpt_da_reconst import DataLoader_c
+from DataLoader_corean_inpt_da_reconst_seq import DataLoader_c
 #from DataLoader_corean_inpt import DataLoader_c
 from models.stgru import STGRU
 from models.flownet2 import Flownet2
@@ -71,9 +71,9 @@ class U_Net(object):
     def get_data_cache(self):
         with tf.device('/cpu:0'):
             #train data loader
-            self.train_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.train_mask_path, cfgs.image_path, cfgs.da_im_path)
+            self.train_dl = DataLoader_c()
             #valid data loader
-            self.valid_dl = DataLoader_c(cfgs.IMAGE_SIZE, cfgs.nbr_frames, cfgs.val_mask_path, cfgs.image_path, cfgs.da_im_path)
+            self.valid_dl = DataLoader_c()
 
     #2. Net
     def Pre_Net(self):
@@ -83,11 +83,13 @@ class U_Net(object):
         '''
         # Input
         sz = [1, cfgs.U_IMAGE_SIZE[0], cfgs.U_IMAGE_SIZE[1], 3]
+        sz1 = [1, cfgs.U_IMAGE_SIZE[0], cfgs.U_IMAGE_SIZE[1], 1]
         b_sz = [cfgs.U_IMAGE_SIZE[0], cfgs.U_IMAGE_SIZE[1]]
         re_sz = [1, cfgs.inpt_resize_im_sz[0], cfgs.inpt_resize_im_sz[1], 3]
         b_re_sz = [cfgs.inpt_resize_im_sz[0], cfgs.inpt_resize_im_sz[1]]
         re_sz2 = [1, cfgs.inpt_resize_im_sz[0], cfgs.inpt_resize_im_sz[1], 2]
         comp = tf.ones(re_sz2, dtype=tf.float32)
+        comp_ori = tf.ones(sz1, dtype=tf.float32)
 
         self.prev_img = tf.placeholder(tf.float32, shape=sz)
         self.cur_img = tf.placeholder(tf.float32, shape=sz)
@@ -102,50 +104,61 @@ class U_Net(object):
         @ops.RegisterGradient("BilinearWarping")
         def _BilinearWarping(op, grad):
             return self.bilinear_warping_module.bilinear_warping_grad(grad, op.inputs[0], op.inputs[1])
+        
+        #2. Pad for U-Net
+        paddings = tf.constant([[0, 0], [1, 1], [0, 0], [0, 0]])
+        #self.pad_warped_prev_im = tf.pad(self.warped_prev_im, paddings, 'CONSTANT')
+        self.pad_cur_im = tf.pad(self.cur_img, paddings, 'CONSTANT')
 
+        
+        #3. current frame segmetation
+        self.u_net = utils_layers.U_Net_gp()
+        self.unet_infer_name = 'inference'
+        self.unet_ch = cfgs.cur_channel + cfgs.seq_num
+        self.unet_keep_pro = cfgs.keep_prob
+        self.cur_static_output, self.cur_static_anno_pred = self.u_net_inference(self.pad_cur_im, self.unet_infer_name, self.unet_ch, self.unet_keep_pro)
+        
 
-        #2. Init flownet
+        #4. Init flownet
         with tf.variable_scope('flow'):
             self.flow_network = Flownet2(self.bilinear_warping_module)
             self.flow_tensor = self.flow_network(self.re_cur_img, self.re_prev_img, flip=True)
         
-        #3. Normal flow data
-        mask = tf.cast(self.cur_mask[0:1, :, :, 0:2] > 127.5, tf.float32)
+        #5. Normal flow data
+        inst_mask = tf.where(tf.equal(tf.expand_dims(self.cur_static_anno_pred[:, :, :, 1], axis=3), 1), comp_ori, 1-comp_ori)
+        self.re_cur_inst_mask = tf.image.resize_bicubic(inst_mask*255, b_re_sz)
+        mask1 = tf.cast(self.re_cur_inst_mask > 127, tf.float32)
+        self.mask1 = mask1
+        mask = tf.cast(tf.concat([mask1, mask1], axis=3), tf.float32)
         remove_mask = tf.multiply((comp-mask), self.flow_tensor)
+        self.cur_mask = mask * 255
         self.inpt_flow_input, self.max_v = dp_tf.normal_data(remove_mask)
         self.inpt_data = dp_tf.concat_data(self.inpt_flow_input, self.cur_mask)
     
         
-        #4. Init flow-inpaint net
+        #6. Init flow-inpaint net
         config = Config('cfgs/inpaint.yml')
         self.inpt_network = InpaintModel()
         self.inpt_g_vars, self.inpt_pred_flow, self.pred_complete_flow = self.inpt_network.build_graph(
             self.inpt_data, config=config)
         self.inpt_pred_flow = self.inpt_pred_flow * self.max_v
-        #self.inpt_pred_flow = tf.image.resize_bicubic(self.inpt_pred_flow, b_sz)
+        #self.inpt_pred_flow_re = tf.image.resize_bicubic(self.inpt_pred_flow, b_sz)
+        self.inpt_pred_flow_re = tf.multiply(self.flow_tensor, comp-mask1)
         self.warped_prev_im = self.bilinear_warping_module.bilinear_warping(self.re_prev_img, self.inpt_pred_flow)
         self.warped_prev_im = tf.image.resize_bicubic(self.warped_prev_im, b_sz)
 
-        #5. Pad for U-Net
-        paddings = tf.constant([[0, 0], [2, 2], [0, 0], [0, 0]])
+        #7. Pad for U-Net
         self.pad_warped_prev_im = tf.pad(self.warped_prev_im, paddings, 'CONSTANT')
-        self.pad_cur_im = tf.pad(self.cur_img, paddings, 'CONSTANT')
 
-        #6. init U-Net for static frame segmentation
-        self.u_net = utils_layers.U_Net_gp()
-        self.unet_infer_name = 'inference'
-        self.unet_ch = cfgs.cur_channel + cfgs.seq_num
-        self.unet_keep_pro = cfgs.keep_prob
+        #8. prev_frame after warped segmentation
         self.warped_static_output, self.warped_static_anno_pred = self.u_net_inference(self.pad_warped_prev_im, self.unet_infer_name, self.unet_ch, self.unet_keep_pro)
-        self.cur_static_output, self.cur_static_anno_pred = self.u_net_inference(self.pad_cur_im, self.unet_infer_name, self.unet_ch, self.unet_keep_pro)
         
-        #7. Reconstruction
+        #9. Reconstruction
         u_mask = tf.image.resize_bicubic(self.cur_mask, b_sz)
         self.u_mask = tf.cast(u_mask[0:1, :, :, 0:1] > 127.5, tf.float32)
         insect_area = tf.cast((tf.multiply(self.warped_static_anno_pred, tf.cast(self.u_mask, tf.int64))) / 2, tf.int32)
-        self.reconst_cur_anno = tf.cast(self.cur_static_anno_pred / 2, tf.int32) + insect_area
-        
-
+        self.reconst_cur_anno = tf.cast(self.cur_static_anno_pred / 2, tf.int32) + insect_area*2
+        #self.reconst_cur_anno = tf.cast(self.cur_static_anno_pred / 2, tf.int32)
 
 
 
@@ -185,7 +198,7 @@ class U_Net(object):
         anno_pred = tf.expand_dims(anno_pred, axis=3)
         anno_pred = tf.concat([anno_pred, anno_pred, anno_pred], 3)    
 
-        return logits[:, 2:cfgs.U_IMAGE_SIZE[0]+2, :, :], anno_pred[:, 2:cfgs.U_IMAGE_SIZE[0]+2, :, :]
+        return logits[:, 1:cfgs.U_IMAGE_SIZE[0]+1, :, :], anno_pred[:, 1:cfgs.U_IMAGE_SIZE[0]+1, :, :]
         #return logits, anno_pred
 
   

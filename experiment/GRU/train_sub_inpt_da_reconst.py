@@ -162,17 +162,15 @@ class SeqFCNNet(FCNNet):
             step += 1
             
             #1. Load data.
-            images_pad, mask, fn, flag = data_loader.get_next_sequence()
-            if flag == False:
-                print(fn)
+            cur_im, prev_im, ellip_info, fn= data_loader.get_next_sequence()
+            #if flag == False:
+                #print(fn)
                 # Can't find prev data.
-                continue
+                #continue
             
 
-
-            feed_dict = {self.prev_img: images_pad[0],
-                         self.cur_img: images_pad[1],
-                         self.cur_mask: mask
+            feed_dict = {self.prev_img: prev_im,
+                         self.cur_img: cur_im,
             }
             '''
             inpt_flow, inpt_warped_im,\
@@ -182,9 +180,13 @@ class SeqFCNNet(FCNNet):
                                                   feed_dict=feed_dict)
             '''
             #reconst_anno = sess.run(self.reconst_cur_anno, feed_dict=feed_dict)
-            cur_anno = sess.run(self.cur_static_anno_pred, feed_dict=feed_dict)
+            reconst_anno, warped_anno, warped_im, inpt_flow, flow = sess.run([self.reconst_cur_anno, self.warped_static_anno_pred, self.warped_prev_im, self.inpt_pred_flow_re, self.inpt_pred_flow], feed_dict=feed_dict)
+            self.view_im_cvt_one(warped_im[0], fn, step, 'warped_im', 'valid')
+            self.view_im_one(reconst_anno[0, :, :, 1]*127, fn, step, 'anno_reconst', 'valid')
+            self.view_im_one(warped_anno[0, :, :, 1]*127, fn, step, 'anno_warp', 'valid')
+            self.view_flow_one(inpt_flow[0], fn, step, 'flow', 'valid' )
+            self.view_flow_one(flow[0], fn, step, 'flow_no', 'valid')
 
-            #
             #self.view_flow_one(inpt_flow[0], fn, step, 'inpt', 'valid')
             #self.view_patch_one(inpt_warped_im[0], fn, step, 'im', 'valid')
             '''
