@@ -3,10 +3,11 @@ from easydict import EasyDict as edict
 
 
 cfgs = edict()
+
 #1. path
 #1.1 Image path
-cfgs.image_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/s8_video_part_3000_noInst'
-cfgs.da_im_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/data1222/rect_inst_da'
+cfgs.image_path = '/home/gp/repos/FCN/experiment/data_process/data_270_480/inst_da/s8_video_part_3000_noInst'
+cfgs.da_im_path = '/home/gp/repos/FCN/experiment/data_process/data_270_480/inst_da/data1229/rect_inst_da'
 
 #1.2 Label path
 #Remove occulded area labels fine-tune labels.
@@ -14,27 +15,29 @@ cfgs.train_anno_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_part_
 cfgs.val_anno_path = '/home/gp/repos/FCN/experiment/data_process/data/s8_part_video_gtFine3_inter6_1206/val'
 
 # inpainting flow mask path
-cfgs.train_mask_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/data1222/rect_inst_da_mask/train'
-cfgs.val_mask_path = '/home/gp/repos/FCN/experiment/data_process/data/inst_da/data1222/rect_inst_da_mask/val'
+cfgs.train_mask_path = '/home/gp/repos/FCN/experiment/data_process/data_270_480/inst_da/data1229/rect_inst_da_mask/train'
+cfgs.val_mask_path = '/home/gp/repos/FCN/experiment/data_process/data_270_480/inst_da/data1229/rect_inst_da_mask/val'
+
+
 
 # Load inpainting flow pickle.
 cfgs.inpt_flow_pickle = '/home/gp/repos/FCN/experiment/GRU/data/inpt_flow_dilate_pickle'
 
 
 #1.3 Logs path
-cfgs.unet_logs_dir = '/home/gp/repos/FCN/experiment/weakly_supervised/logs/logs_s8ori3_noOcculde_label2_1116/'
+cfgs.unet_logs_dir = 'logs_unet/logs_s8ori3_noOcculde_label2_instWeak05_270_480_0103'
 cfgs.flow_logs_dir = 'logs/flow/'
 cfgs.flow_logs_name = 'flownet2'
 #I 10: inter 10
 #rsz: resize
 #warpAdd: add warp loss to loss function
-cfgs.gru_logs_dir = 'logs/s8_inpt_RectInstDa_I10_rsz256_WarpAdd02_reconst_1225/'
-
+cfgs.gru_logs_dir = 'logs/s8_inpt_RectInstDa_VarI_rsz256_WarpAdd02_EPDsdm1_5_1229'
 
 #1.4 Others
 #cfgs.view_path = 'view/s8_gru_flow_inpt_warp1210'
-cfgs.view_path = 'view_inpt/s8_RectInptDa_I10_rsz256_WarpAdd02_reconstAnno_1225'
+cfgs.view_path = 'view_inpt/s8_RectInptDa_I5_rsz256_W02_Exdsdm_reconstAnno1_0109'
 cfgs.pickle_path = 'data/flow_dilate_pickle'
+
 
 #2. unet param
 cfgs.class_convs_num = 2 
@@ -58,11 +61,11 @@ cfgs.MODEL_NAME = "imagenet-resnet-101-dag.mat"
 cfgs.result_dir = 'result/'
 cfgs.debug = 'False'
 cfgs.mode = 'train'
-cfgs.max_epochs = 51
+cfgs.max_epochs = 66
 cfgs.NUM_OF_CLASSESS = 3
 
 cfgs.IMAGE_SIZE = [270, 480]
-cfgs.U_IMAGE_SIZE = [540, 960]
+cfgs.U_IMAGE_SIZE = [270, 480]
 cfgs.if_pad = [False, False, True, True]
 cfgs.pad_num_w = 0
 cfgs.pad_num_h = 1
@@ -120,7 +123,7 @@ cfgs.fuse_ellip = False
 cfgs.lower_anno = False
 cfgs.fit_ellip_lower = False
 cfgs.view_seq = False
-cfgs.random_view = True
+cfgs.random_view = False
 cfgs.test_accu = True
 cfgs.test_view = True
 cfgs.if_train = True

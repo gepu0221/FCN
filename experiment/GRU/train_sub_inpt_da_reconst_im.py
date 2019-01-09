@@ -16,11 +16,9 @@ from tools.generate_heatmap import density_heatmap, density_heatmap_br, transluc
 from tools.flow_color import flowToColor, med_flow_color
 from tools.data_preprocess import normal_data, concat_data, sdm, local_patch
 import shutil, random
-import accu.CaculateAccurary_270_480 as accu
-
 
 #from train_seq_parent import FCNNet
-from train_InpaintFlow_parent_reconst import U_Net as FCNNet
+from train_InpaintFlow_parent_reconst_im import U_Net as FCNNet
 
 try:
     from .cfgs.config import cfgs
@@ -40,8 +38,8 @@ class SeqFCNNet(FCNNet):
         
         self.create_view_path()
         
-        accu.create_ellipse_f()
-        self.e_acc = accu.Ellip_acc()
+        #accu.create_ellipse_f()
+        #self.e_acc = accu.Ellip_acc()
 
     #1. get data
 
@@ -107,17 +105,6 @@ class SeqFCNNet(FCNNet):
         im = np.expand_dims(np.expand_dims(im, axis=2), axis=0)
         
         return 255 - im
-    
-    #Accuracy
-    def calculate_acc(self, im, filenames, pred_anno, gt_ellip_info, if_valid=False, if_epoch=True):
-        with tf.name_scope('ellip_accu'):
-            if cfgs.test_accu and if_epoch:
-                self.ellip_acc = self.e_acc.caculate_ellip_accu(im, filenames, pred_anno, gt_ellip_info, if_valid, if_epoch)
-            
-            else:
-                self.ellip_acc = 0
-    
-    #
 
     def view_flow_one(self, flow, fn, step, a_str='', f_path='train'):
         if cfgs.test_view:
@@ -170,28 +157,53 @@ class SeqFCNNet(FCNNet):
         
         #True number to loss
         t_count = 0
-        if_epoch = cfgs.test_accu
-
 
         for count in range(1, data_num):
             step += 1
             
             #1. Load data.
-            cur_im, prev_im, ellip_info, fn= data_loader.get_next_sequence_search_key()
+            images_pad, mask, fn, flag = data_loader.get_next_sequence()
+            if flag == False:
+                print(fn)
+                # Can't find prev data.
+                continue
+            
 
-            feed_dict = {self.prev_img: prev_im,
-                         self.cur_img: cur_im,
+
+            feed_dict = {self.prev_img: images_pad[0],
+                         self.cur_img: images_pad[1],
+                         self.cur_mask: mask
             }
+            
+            inpt_flow, inpt_warped_im,\
+            flow,\
+            cur_anno, reconst_anno, warped_anno = sess.run(\
+                            [self.inpt_pred_flow_re, self.warped_prev_im,\
+                            self.flow_tensor_re,\
+                            self.cur_static_anno_pred, self.reconst_cur_anno, self.warped_static_anno_pred],\
+                                                  feed_dict=feed_dict)
+            
             #reconst_anno = sess.run(self.reconst_cur_anno, feed_dict=feed_dict)
-            #_ = sess.run(self.cur_static_anno_pred, feed_dict=feed_dict)
-            reconst_anno, warped_anno, warped_im, inpt_flow, flow = sess.run([self.reconst_cur_anno, self.warped_static_anno_pred, self.warped_prev_im, self.inpt_pred_flow_re, self.inpt_pred_flow], feed_dict=feed_dict)
-            self.view_im_cvt_one(warped_im[0], fn, step, 'warped_im', 'valid')
-            self.view_im_one(reconst_anno[0, :, :, 1]*127, fn, step, 'anno_reconst', 'valid')
-            self.view_im_one(warped_anno[0, :, :, 1]*127, fn, step, 'anno_warp', 'valid')
-            self.view_flow_one(inpt_flow[0], fn, step, 'flow', 'valid' )
-            self.view_flow_one(flow[0], fn, step, 'flow_no', 'valid')
+            #cur_anno = sess.run(self.cur_static_anno_pred, feed_dict=feed_dict)
 
-            self.calculate_acc(cur_im.copy(), [fn], reconst_anno[:, :, :, 0], [ellip_info], True, if_epoch)
+            #
+            self.view_flow_one(inpt_flow[0], fn, step, 'flow_inpt', 'valid')
+            self.view_flow_one(flow[0], fn, step, 'flow', 'valid')
+
+            #self.view_patch_one(inpt_warped_im[0], fn, step, 'im', 'valid')
+            
+            self.view_im_one(cur_anno[0]*127, fn, step, 'anno_cur', 'valid')
+            self.view_im_one(warped_anno[0]*127, fn, step, 'anno_warped', 'valid')
+            self.view_im_one(reconst_anno[0]*255, fn, step, 'anno_reconst', 'valid')
+            #self.view_im_cvt_one(images_pad[0][0]+inpt_warped_im[0], fn, step, 'im_prev', 'valid')
+            #self.view_im_cvt_one(images_pad[1][0]+inpt_warped_im[0], fn, step, 'im_cur', 'valid')
+            self.view_im_cvt_one(images_pad[0][0], fn, step, 'im_prev', 'valid')
+            self.view_im_cvt_one(images_pad[1][0], fn, step, 'im_cur', 'valid')
+            
+            self.view_im_cvt_one(inpt_warped_im[0], fn, step, 'im_warped', 'valid')
+            #self.view_im_one(cur_anno[0]*127, fn, step, 'anno_cur', 'valid')
+            
+            
 
             t_count += 1
             #3. calculate loss
@@ -205,7 +217,7 @@ class SeqFCNNet(FCNNet):
 
             #5. print
             #line = 'none'
-            line = 'Train epoch %2d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t m_loss=%.4f\t  m_imW_loss = %.4f\t m_f_loss = %.4f\t  time = %.3f' % (epoch, cfgs.inpt_lr, step, count, loss, (total_loss/t_count), (total_im_warp_loss/t_count), (total_flow_loss/t_count), time_per_batch)
+            line = 'Train epoch %2d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t m_loss=%.4f\t  m_imW_loss = %.4f\t m_f_loss = %.4f\t  time = %.2f' % (epoch, cfgs.inpt_lr, step, count, loss, (total_loss/t_count), (total_im_warp_loss/t_count), (total_flow_loss/t_count), time_per_batch)
             utils.clear_line(len(line))
             print('\r' + line, end='')
 
