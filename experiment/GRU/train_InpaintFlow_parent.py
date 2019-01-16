@@ -104,6 +104,7 @@ class U_Net(object):
         self.inpt_network = InpaintModel()
         self.inpt_g_vars, self.inpt_pred_flow, self.pred_complete_flow = self.inpt_network.build_graph(
             self.inpt_data, config=config)
+        self.inpt_pred_flow_normal = self.inpt_pred_flow
         self.inpt_pred_flow = self.inpt_pred_flow * self.max_v
         self.pred_complete_flow *= self.max_v
         paddings = tf.constant([[0, 0], [0, cfgs.grid_padding], [0, 0], [0, 0]])
@@ -400,7 +401,7 @@ class U_Net(object):
                         pass
 
                     #3.2 train one epoch
-                    step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
+                    #step = self.train_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
                     #self.valid_one_epoch(sess, self.train_dl, cfgs.train_num, epoch, step)
 
                     
@@ -408,7 +409,7 @@ class U_Net(object):
                     self.valid_one_epoch(sess, self.valid_dl, cfgs.valid_num, epoch, step)
                     self.cur_epoch.load(epoch, sess)
                     self.current_itr_var.load(step, sess)
-                    saver.save(sess, cfgs.gru_logs_dir + 'model.ckpt', step)
+                    #saver.save(sess, cfgs.gru_logs_dir + 'model.ckpt', step)
                     print('---------------------------------------------------------')
 
     

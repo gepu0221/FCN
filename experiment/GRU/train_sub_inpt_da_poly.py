@@ -14,7 +14,7 @@ from six.moves import xrange
 from tools.label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from tools.generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
 from tools.flow_color import flowToColor, med_flow_color
-from tools.data_preprocess import normal_data, concat_data, sdm, local_patch, expand_sdm, expand_local_patch
+from tools.data_preprocess import normal_data, concat_data, sdm, local_patch
 import shutil, random
 
 #from train_seq_parent import FCNNet
@@ -65,11 +65,10 @@ class SeqFCNNet(FCNNet):
     def build(self):
         
         self.get_data_cache()
-        #self.expand_sdm_loss()
-        self.loss()
-        self.error_acu()
-        #self.poly_loss()
+        #self.loss()
+        self.poly_loss()
         self.train_optimizer()
+        #self.accuracy()
 
         
      #6. else
@@ -120,32 +119,7 @@ class SeqFCNNet(FCNNet):
         #color_flow = med_flow_color(flow)
         cv2.imwrite(os.path.join(path_, filename+'_flow_%s.bmp' % a_str), color_flow)
         
-    def view_flow_patch_one(self, flow, fn, step, a_str='', f_path='train'):
-        if cfgs.test_view:
-            filename = fn
-        else:
-            filename = str(step)+'_'+fn
-
-        path_ = os.path.join(cfgs.view_path, f_path)
-        color_flow = flowToColor(flow)
-        h, w = cfgs.IMAGE_SIZE
-        #color_flow = cv2.resize(color_flow, (w, h), interpolation=cv2.INTER_CUBIC)
-        #color_flow = med_flow_color(flow)
-        cv2.imwrite(os.path.join(path_, filename+'_flow_%s.bmp' % a_str), color_flow)
-    
-    def view_patch_one(self, patch, fn, step, a_str='', f_path='train'):
-        if cfgs.test_view:
-            filename = fn
-        else:
-            filename = str(step)+'_'+fn
-
-        path_ = os.path.join(cfgs.view_path, f_path)
-        #color_flow = cv2.resize(color_flow, (w, h), interpolation=cv2.INTER_CUBIC)
-        #color_flow = med_flow_color(flow)
-        patch = cv2.cvtColor(patch, cv2.COLOR_BGR2RGB)
-        cv2.imwrite(os.path.join(path_, filename+'_flow_%s.bmp' % a_str), patch)
-
-
+ 
     def view_inst_mask_one(self, inst_mask, fn, step, a_str=''):
         '''
             Generate mask of instrument removed.
@@ -178,7 +152,7 @@ class SeqFCNNet(FCNNet):
         if cfgs.inpt_resize:
             prev_warping = cv2.resize(prev_warping, (w, h), interpolation=cv2.INTER_CUBIC)
         cv2.imwrite(os.path.join(path_, filename+'_warp%s.bmp' % str_a), prev_warping)
-        
+
         if if_more:
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
             im = cv2.resize(im, (w, h), interpolation=cv2.INTER_CUBIC)
@@ -188,7 +162,7 @@ class SeqFCNNet(FCNNet):
             if cfgs.inpt_resize:
                 im_prev = cv2.resize(im_prev, (w, h), interpolation=cv2.INTER_CUBIC)
             cv2.imwrite(os.path.join(path_, filename+'_im_prev%s.bmp' % str_a), im_prev)
-        
+       
     def view(self, fns, pred_annos, pred_pros, ims, step, str_a='', if_more=True, f_path='train'):
         num_ = fns.shape[0]
         if cfgs.random_view:
@@ -199,7 +173,114 @@ class SeqFCNNet(FCNNet):
                 self.view_one(fns[i], pred_annos[i], pred_pros[i], ims[i], step, str_a, if_more, f_path)   
 
         
+    def persist_cornea(self):
+        '''
+            remove the part of instrutment and background to persist cornea part.
+        '''
+        self.persist_im = tf.placeholder(tf.float32)
+        sz = [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
+        comp = tf.ones(sz, dtype=tf.float32)
+        pro_one = tf.expand_dims(tf.where(tf.less_equal(self.unet_pro[:, :, :, 2], cfgs.low_pro), 1-comp, comp), dim=3)
+        pro = pro_one
+        pro = tf.concat([pro, pro_one], axis=3)
+        pro = tf.concat([pro, pro_one], axis=3)
+        self.corn_mask = pro_one
+        self.corn_mask_im = tf.multiply(self.persist_im, pro)
+
+    def remove_inst(self):
+        '''
+            remove the part of instrutment and background to persist cornea part.
+        '''
+        #self.persist_im = tf.placeholder(tf.float32)
+        sz = [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1]]
+        comp = tf.ones(sz, dtype=tf.float32)
+        pro_one = tf.expand_dims(tf.where(tf.less_equal(self.unet_pro[:, :, :, 1], cfgs.low_pro), comp, 1-comp), dim=3)
+        pro = pro_one
+        pro = tf.concat([pro, pro_one], axis=3)
+        pro = tf.concat([pro, pro_one], axis=3)
+        self.no_inst_mask = pro_one
+        #self.no_inst_mask_im = tf.multiply(self.persist_im, pro)
+    
+    def remove_flow_inst(self):
+        '''
+            Remove the part of instrument part of flow map.
+        '''
+        # Mask of reomving instrument part of current frame.
+        self.flow_inst_mask = tf.placeholder(tf.float32)
+        # Mask of persisting cornea part of current frame.
+        self.flow_corn_mask = tf.placeholder(tf.float32)
+        # Mask of removing instrument part of prev frame.
+        self.flow_prev_corn_mask = tf.placeholder(tf.float32)
+
+        no_inst_pro = tf.concat([self.flow_inst_mask, self.flow_inst_mask], axis=3)
+        self.no_inst_flow = tf.multiply(self.flow_tensor, no_inst_pro)
+
+        corn_pro = tf.concat([self.flow_corn_mask, self.flow_corn_mask], axis=3)
+        corn_num = tf.reduce_sum(self.flow_corn_mask)
+        self.corn_flow = tf.multiply(self.flow_tensor, corn_pro)
+        self.corn_flow_mean = tf.reduce_sum(self.corn_flow, [0, 1, 2]) / corn_num
+        sz = [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 2]
+        comp = tf.ones(sz, dtype=tf.float32)
+        mean_comp = comp * self.corn_flow_mean
+               
+        self.insect_area = tf.multiply((comp - self.flow_inst_mask), self.flow_prev_corn_mask)
+        self.pred_corn_flow = tf.multiply(self.insect_area, mean_comp)
+        self.flow_comb = self.no_inst_flow + self.pred_corn_flow
+
+        #self.no_inst_warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.flow_comb)
+
+    def remove_flow_inst(self):
+        '''
+            Remove the part of instrument part of flow map.
+        '''
+        # Mask of reomving instrument part of current frame.
+        self.flow_inst_mask = tf.placeholder(tf.float32)
+        # Mask of persisting cornea part of current frame.
+        self.flow_corn_mask = tf.placeholder(tf.float32)
+        # Mask of removing instrument part of prev frame.
+        self.flow_prev_corn_mask = tf.placeholder(tf.float32)
+        # Segmentation(logits) of prev frame to warp to another.
+        self.flow_segm = tf.placeholder(tf.float32)
+
+        no_inst_pro = tf.concat([self.flow_inst_mask, self.flow_inst_mask], axis=3)
+        self.no_inst_flow = tf.multiply(self.flow_tensor, no_inst_pro)
+
+        corn_pro = tf.concat([self.flow_corn_mask, self.flow_corn_mask], axis=3)
+        corn_num = tf.reduce_sum(self.flow_corn_mask)
+        self.corn_flow = tf.multiply(self.flow_tensor, corn_pro)
+        self.corn_flow_mean = tf.reduce_sum(self.corn_flow, [0, 1, 2]) / corn_num
+        sz = [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 2]
+        comp = tf.ones(sz, dtype=tf.float32)
+        mean_comp = comp * self.corn_flow_mean
+               
+        self.insect_area = tf.multiply((comp - self.flow_inst_mask), self.flow_prev_corn_mask)
+        self.pred_corn_flow = tf.multiply(self.insect_area, mean_comp)
+        self.flow_comb = self.no_inst_flow + self.pred_corn_flow
         
+        #For image
+        self.no_inst_warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.flow_comb)
+        # For segmentation(logits)
+        self.no_inst_warped_segm = self.bilinear_warping_module.bilinear_warping(self.flow_segm, self.flow_comb)
+        self.no_inst_warped_segm = tf.expand_dims(tf.argmax(tf.nn.softmax(self.no_inst_warped_segm), dimension=3), axis=3)
+    
+    def flow_warp(self):
+        
+        self.flow_warp_img0 = tf.placeholder(tf.float32)
+        self.flow_warp_img1 = tf.placeholder(tf.float32)
+
+        self.warp_flow = tf.placeholder(tf.float32)
+        
+        self.result_warped_segm = self.bilinear_warping_module.bilinear_warping(self.flow_warp_img1, self.warp_flow)
+        self.result_warped = tf.expand_dims(tf.argmax(tf.nn.softmax(self.result_warped_segm), dimension=3), axis=3)
+    
+        sz = [cfgs.batch_size, cfgs.IMAGE_SIZE[0], cfgs.IMAGE_SIZE[1], 1]
+        comp = tf.ones(sz, dtype=tf.float32)
+        anno_img0 = tf.expand_dims(tf.argmax(tf.nn.softmax(self.flow_warp_img0), dimension=3), axis=3)
+        anno_img0 = tf.cast(anno_img0 / 2, tf.int32)
+        insect_area = tf.cast((tf.multiply(self.result_warped, tf.cast(comp-self.flow_inst_mask, tf.int64))) / 2, tf.int32)
+
+        self.insect_result_warped = insect_area + anno_img0
+
     def loss(self):
         
         # 1. warped loss
@@ -218,89 +299,9 @@ class SeqFCNNet(FCNNet):
         self.sd_mask = tf.placeholder(tf.float32)
         local_patch_inpt_flow = local_patch(self.inpt_pred_flow, self.rect_param)
         local_patch_ori_flow = local_patch(self.ori_flow, self.rect_param)
-        self.local_patch_inpt_flow = local_patch_inpt_flow
 
-
-        self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow) * self.sd_mask)
-        #self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
-
-        self.flow_loss_ = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
-
-
-        # 3. Use prediction complete flow to caculate loss.
-        self.complete_flow_loss = tf.reduce_mean(tf.abs(self.ori_flow - self.pred_complete_flow))
-
-        #self.loss = self.complete_flow_loss
-        self.loss = self.flow_loss
-        #self.loss = cfgs.w_warp_loss * self.im_warp_loss + (1-cfgs.w_warp_loss) * self.flow_loss
-    
-    def error_acu(self):
-        #flow
-        self.ori_flow_normal, _ = tf.split(self.inpt_data, 2, axis=2)
-        # ori_im
-        self.ori_cur_im = tf.placeholder(tf.float32)
-
-        #self.rect_param = tf.placeholder(shape = [4], dtype=tf.int32)
-        local_inpt_flow_normal = local_patch(self.inpt_pred_flow_normal, self.rect_param)
-        local_ori_flow_normal = local_patch(self.ori_flow_normal, self.rect_param)
-
-        self.l1_e =tf.reduce_mean(tf.abs(local_inpt_flow_normal - local_ori_flow_normal)) / 2
-        self.l2_e = tf.reduce_mean((local_inpt_flow_normal - local_ori_flow_normal)**2 ) / 4
-
-        #warped im 
-        local_ori_warped_im = local_patch(self.ori_warped_im, self.rect_param)
-        local_inpt_warped_im = local_patch(self.inpt_warped_im, self.rect_param)
-
-        self.w_l1_e =tf.reduce_mean(tf.abs(local_ori_warped_im - local_inpt_warped_im)) / 256
-        self.w_l2_e = tf.reduce_mean((local_ori_warped_im/256 - local_inpt_warped_im/256)**2 )
-        
-        self.w_psnr = -10.0 * tf.log(tf.cast(tf.reduce_mean(((local_ori_warped_im-local_inpt_warped_im)/256)**2), tf.float32)) / tf.log(10.0)
-
-
-
-        #im
-        local_ori_im = local_patch(self.ori_cur_im, self.rect_param)
-        local_warped_im = local_patch(self.inpt_warped_im, self.rect_param)
-        self.local_ori_im = local_ori_im
-        self.local_warped_im = local_warped_im
-
-        self.im_l1_e =tf.reduce_mean(tf.abs(local_ori_im - local_warped_im)) / 256
-        self.im_l2_e = tf.reduce_mean((local_ori_im/256 - local_warped_im/256)**2 )
-
-        self.psnr = -10.0 * tf.log(tf.cast(tf.reduce_mean(((local_ori_im-local_warped_im)/256)**2), tf.float32)) / tf.log(10.0)
-
-
-    # Expand sdm loss
-    def expand_sdm_loss(self):
-        
-        # 1. warped loss
-        self.ori_flow = tf.placeholder(tf.float32)
-        self.inpt_warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.inpt_pred_flow)
-        self.ori_warped_im = self.bilinear_warping_module.bilinear_warping(self.flow_img1, self.ori_flow)
-        self.im_warp_loss = tf.reduce_mean(tf.abs(self.inpt_warped_im - self.ori_warped_im))
-        
-        # 2. mask optical loss
-        batch_raw, masks_raw = tf.split(self.inpt_data, 2, axis=2)
-        mask = tf.cast(masks_raw[0:1, :, :, 0:2] > 127.5, tf.float32)
-        paddings = tf.constant([[0, 0], [0, cfgs.grid_padding], [0, 0], [0, 0]])
-        mask = tf.pad(mask, paddings, 'CONSTANT')
-
-        self.rect_param = tf.placeholder(shape = [4], dtype=tf.int32)
-        self.epd_rect_param = tf.placeholder(shape = [4], dtype=tf.int32)
-        self.epd_sd_mask = tf.placeholder(tf.float32)
-
-        local_patch_inpt_flow = local_patch(self.inpt_pred_flow, self.rect_param)
-        local_patch_ori_flow = local_patch(self.ori_flow, self.rect_param)
-        self.local_patch_inpt_flow = local_patch_inpt_flow
-        
-        epd_l_p_inpt_flow = local_patch(self.inpt_pred_flow, self.epd_rect_param)
-        epd_l_p_ori_flow = local_patch(self.ori_flow, self.epd_rect_param)
-
-
-        self.flow_loss = tf.reduce_mean(tf.abs(epd_l_p_inpt_flow - epd_l_p_ori_flow) * self.epd_sd_mask)
-        #self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
-
-        self.flow_loss_ = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
+        #self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow) * self.sd_mask)
+        self.flow_loss = tf.reduce_mean(tf.abs(local_patch_inpt_flow - local_patch_ori_flow))
 
 
         # 3. Use prediction complete flow to caculate loss.
@@ -310,8 +311,6 @@ class SeqFCNNet(FCNNet):
         #self.loss = self.flow_loss
         self.loss = cfgs.w_warp_loss * self.im_warp_loss + (1-cfgs.w_warp_loss) * self.flow_loss
 
-
-    
     def poly_loss(self):
         
         self.ori_flow = tf.placeholder(tf.float32)
@@ -359,7 +358,7 @@ class SeqFCNNet(FCNNet):
             
             images, images_da, mask, fn, flag, rect_param = data_loader.get_next_sequence()
             if flag == False:
-                #print(fn)
+                print(fn)
                 # Can't find prev data.
                 continue
             # Origin optical flow
@@ -378,9 +377,7 @@ class SeqFCNNet(FCNNet):
 
             normal_flow, normal_max_v = normal_data(flow)
             inpt_input, flag_ = concat_data(normal_flow, mask, cfgs.grid)
-            sd_mask = sdm(rect_param, cfgs.gamma)
-            #epd_sd_mask, epd_rect_param = expand_sdm(rect_param, cfgs.gamma, cfgs.epd_ratio)
-
+            #sd_mask = sdm(rect_param, cfgs.gamma)
 
             if flag_ == False:
                 print(fn)
@@ -390,28 +387,26 @@ class SeqFCNNet(FCNNet):
             t_count += 1
             _, loss, im_warp_loss, flow_loss, \
             inpt_warped_im, inpt_flow, pred_flow, \
-             =sess.run([\
-             self.opt,\
-             self.loss, self.im_warp_loss, self.flow_loss_, \
+             =sess.run([self.opt, self.loss, self.im_warp_loss, self.flow_loss, \
                                         self.inpt_warped_im, self.inpt_pred_flow, self.pred_complete_flow],\
                                                feed_dict={self.flow_img1: last_im,
                                                           self.flow_img0: im,
                                                           self.ori_flow: flow,
                                                           self.max_v: normal_max_v,
-                                                          self.inpt_data: inpt_input,
-                                                          #self.epd_sd_mask: epd_sd_mask,
-                                                          #self.epd_rect_param: epd_rect_param,
-                                                          self.sd_mask: sd_mask,
-                                                          self.rect_param: rect_param})
+                                                          self.inpt_data: inpt_input})
+                                                          #self.sd_mask: sd_mask,
+                                                          #self.rect_param: rect_param})
             
-            
-            if count % 200 == 0:
+            if count % 50 == 0:
                 self.view(np.expand_dims(fn, 0), inpt_warped_im, images[cfgs.seq_frames-2], images[cfgs.seq_frames-1], step)
                 self.view(np.expand_dims(fn, 0), inpt_warped_im, images_da[cfgs.seq_frames-2], images_da[cfgs.seq_frames-1], step), '_da'
+            
+
                 self.view_flow_one(flow[0], fn, step)
                 self.view_flow_one(pred_flow[0], fn, step, 'complete')
                 self.view_flow_one(inpt_flow[0], fn, step, 'inpt')
                 self.view_flow_one(flow_da[0], fn, step, 'da')
+
             #3. calculate loss
             total_loss += loss
             total_im_warp_loss += im_warp_loss
@@ -444,7 +439,6 @@ class SeqFCNNet(FCNNet):
             data_num: number of data.
         '''
         total_loss, total_im_warp_loss, total_flow_loss = 0, 0, 0
-        total_l1, total_im_l1, total_l2, total_im_l2, total_psnr = 0, 0, 0, 0, 0
         count = 0
         t0 =time.time()
 
@@ -457,9 +451,9 @@ class SeqFCNNet(FCNNet):
         for count in range(1, data_num):
             step += 1
             
-            images, images_da, mask, fn, flag, rect_param = data_loader.get_next_sequence_valid()
+            images, images_da, mask, fn, flag, rect_param = data_loader.get_next_sequence()
             if flag == False:
-                #print(fn)
+                print(fn)
                 # Can't find prev data.
                 continue
             # Origin optical flow
@@ -478,8 +472,8 @@ class SeqFCNNet(FCNNet):
 
             normal_flow, normal_max_v = normal_data(flow)
             inpt_input, flag_ = concat_data(normal_flow, mask, cfgs.grid)
-            #epd_sd_mask, epd_rect_param = expand_sdm(rect_param, cfgs.gamma, cfgs.epd_ratio)
-            sd_mask = sdm(rect_param, cfgs.gamma)
+            #sd_mask = sdm(rect_param, cfgs.gamma)
+
             if flag_ == False:
                 print(fn)
                 #After grid, area of mask = 0
@@ -488,33 +482,21 @@ class SeqFCNNet(FCNNet):
 
             t_count += 1   
             loss, im_warp_loss, flow_loss,\
-            l_inpt_p, \
-            l1_e, l2_e, im_l1_e, im_l2_e, psnr,\
-            l_ori_im, l_warped_im,\
             inpt_warped_im, inpt_flow, pred_flow \
-            =sess.run([self.loss, self.im_warp_loss, self.flow_loss_,\
-                       self.local_patch_inpt_flow, \
-                       self.l1_e, self.l2_e, self.w_l1_e, self.w_l2_e, self.w_psnr,\
-                       self.local_ori_im, self.local_warped_im,\
+            =sess.run([self.loss, self.im_warp_loss, self.flow_loss,\
                        self.inpt_warped_im, self.inpt_pred_flow, self.pred_complete_flow],\
                                                feed_dict={self.flow_img1: last_im,
                                                           self.flow_img0: im,
-                                                          self.ori_cur_im: images[1],
                                                           self.ori_flow: flow,
                                                           self.max_v: normal_max_v,
-                                                          self.inpt_data: inpt_input,
-                                                          #self.epd_sd_mask: epd_sd_mask,
-                                                          #self.epd_rect_param: epd_rect_param,
-                                                          self.sd_mask: sd_mask,
-                                                          self.rect_param: rect_param})
-
-            #if count % 10 == 0:
-            if False:
+                                                          self.inpt_data: inpt_input})
+                                                          #self.sd_mask: sd_mask,
+                                                          #self.rect_param: rect_param})
+            #if count % 20 == 0:
+            if True:
                 self.view(np.expand_dims(fn, 0), inpt_warped_im, images_da[cfgs.seq_frames-2], images_da[cfgs.seq_frames-1], step, f_path='valid')
-                
-                self.view_patch_one(l_ori_im[0], fn, step, 'l_ori', f_path='valid')
-                self.view_patch_one(l_warped_im[0], fn, step, 'l_warped', f_path='valid')
-                self.view_flow_patch_one(l_inpt_p[0], fn, step, 'l_inpt_p', f_path='valid')
+            
+
                 self.view_flow_one(flow[0], fn, step, f_path='valid')
                 self.view_flow_one(inpt_flow[0], fn, step, '_inpt', 'valid')
                 self.view_flow_one(flow_da[0], fn, step, '_da', 'valid')
@@ -528,12 +510,6 @@ class SeqFCNNet(FCNNet):
             total_loss += loss
             total_im_warp_loss += im_warp_loss
             total_flow_loss += flow_loss
-            total_l1 += l1_e
-            total_im_l1 += im_l1_e
-            total_l2 += l2_e
-            total_im_l2 += im_l2_e
-            total_psnr += psnr
-
 
 
             #4. time consume
@@ -541,9 +517,7 @@ class SeqFCNNet(FCNNet):
             time_per_batch = time_consumed/count
 
             #5. print
-            #line = 'Valid epoch %2d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t m_loss=%.4f\t m_imW_loss = %.4f\t m_f_loss = %.4f\t time = %.2f' % (epoch, cfgs.inpt_lr, step, count, loss, (total_loss/t_count), (total_im_warp_loss/t_count), (total_flow_loss/t_count), time_per_batch)
-            line = 'Valid epoch %2d\t step = %4d\t count = %4d\t m_imW_loss = %.2f\t m_f_loss = %.2f\t l1_e = %.3f\t im_l1_e = %.3f\t l2_e = %.3f\t im_l2_e = %.3f\t psnr = %4f\t' % (epoch, step, count, (total_im_warp_loss/t_count), (total_flow_loss/t_count), (total_l1/count), (total_im_l1/count),  (total_l2/count), (total_im_l2/count), (total_psnr/count))
- 
+            line = 'Valid epoch %2d\t lr = %g\t step = %4d\t count = %4d\t loss = %.4f\t m_loss=%.4f\t m_imW_loss = %.4f\t m_f_loss = %.4f\t time = %.2f' % (epoch, cfgs.inpt_lr, step, count, loss, (total_loss/t_count), (total_im_warp_loss/t_count), (total_flow_loss/t_count), time_per_batch)
             utils.clear_line(len(line))
             print('\r' + line, end='')
 

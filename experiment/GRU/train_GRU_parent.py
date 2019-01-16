@@ -339,7 +339,7 @@ class U_Net(object):
     #10. Model recover
     def return_saver_ckpt(self, sess, logs_dir, var_list):
     
-        saver = tf.train.Saver(var_list)
+        saver = tf.train.Saver(var_list, max_to_keep=50)
         ckpt = tf.train.get_checkpoint_state(logs_dir)
         if ckpt and ckpt.model_checkpoint_path:
             saver.restore(sess, ckpt.model_checkpoint_path)
@@ -449,7 +449,8 @@ class U_Net(object):
                     #self.warp_one_im(sess, step)
                     
                     #3.3 save model
-                    self.valid_once(sess, self.valid_dl, cfgs.valid_num, epoch, step)
+                    self.train_one_epoch_warp_inpt_flow(sess, self.valid_dl, cfgs.valid_num, epoch, step)
+                    #self.valid_once(sess, self.valid_dl, cfgs.valid_num, epoch, step)
                     self.cur_epoch.load(epoch, sess)
                     self.current_itr_var.load(step, sess)
                     saver.save(sess, cfgs.gru_logs_dir + 'model.ckpt', step)

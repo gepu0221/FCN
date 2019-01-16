@@ -131,9 +131,12 @@ class U_Net(object):
         self.re_cur_inst_mask = tf.image.resize_bicubic(inst_mask*255, b_re_sz)
         mask1 = tf.cast(self.re_cur_inst_mask > 127, tf.float32)
         # max pooling
-        mask1 = tf.nn.max_pool(mask1, ksize=[1, 3, 3, 1], strides=[1, 1, 1, 1], padding='SAME')
-        mask1 = tf.nn.max_pool(mask1, ksize=[1, 3, 3, 1], strides=[1, 1, 1, 1], padding='SAME')
-        mask1 = tf.nn.max_pool(mask1, ksize=[1, 3, 3, 1], strides=[1, 1, 1, 1], padding='SAME')
+        mask1 = tf.nn.max_pool(mask1, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
+        mask1 = tf.nn.max_pool(mask1, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
+        mask1 = tf.nn.max_pool(mask1, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
+        mask1 = tf.nn.max_pool(mask1, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
+        mask1 = tf.nn.max_pool(mask1, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
+
 
 
         mask = tf.cast(tf.concat([mask1, mask1], axis=3), tf.float32)
@@ -164,8 +167,8 @@ class U_Net(object):
         u_mask = tf.image.resize_bicubic(self.cur_mask, b_sz)
         self.u_mask = tf.cast(u_mask[0:1, :, :, 0:1] > 127.5, tf.float32)
         insect_area = tf.cast((tf.multiply(self.warped_static_anno_pred, tf.cast(self.u_mask, tf.int64))) / 2, tf.int32)
-        self.reconst_cur_anno = tf.cast(self.cur_static_anno_pred / 2, tf.int32) + insect_area
-        #self.reconst_cur_anno = tf.cast(self.cur_static_anno_pred / 2, tf.int32)
+        #self.reconst_cur_anno = tf.cast(self.cur_static_anno_pred / 2, tf.int32) + insect_area
+        self.reconst_cur_anno = tf.cast(self.cur_static_anno_pred / 2, tf.int32) + tf.cast(self.warped_static_anno_pred / 2, tf.int32)
 
 
 

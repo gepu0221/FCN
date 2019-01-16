@@ -64,8 +64,59 @@ class DataLoader_c():
 
         ellip_info = self.get_ellip_info(fn_split)
 
+
         cur_im = np.expand_dims(cur_im, axis=0)
         prev_im = np.expand_dims(prev_im, axis=0)
 
+
         return cur_im, prev_im, ellip_info, fn
+
+    def get_next_sequence_search_key(self):
+
+
+      
+        im_path = self.L[self.idx % len(self.L)]
+        self.idx += 1
+
+        fn = os.path.splitext(im_path.split("/")[-1])[0]
+        fn_ori = fn.split('_')[0]
+        parts = fn_ori.split('img')
+        #File of which viede, no. of frames
+        f, frame = parts[0], parts[1]
+
+        fn_split = fn.split('_')
+        fn = fn_ori
         
+        cur_im = cv2.imread(im_path)
+        cur_im = cv2.cvtColor(cur_im, cv2.COLOR_BGR2RGB)
+               
+        flag = True
+        dt = -1
+        while True:
+            t = int(frame) + dt
+
+            if t < 0:
+                flag = False
+                break
+
+            fn_ = '%simg%05d.bmp' % (f, t)
+            prev_im_path = os.path.join(cfgs.key_im_path, fn_)
+            if os.path.exists(prev_im_path):
+                prev_im = cv2.imread(prev_im_path)
+                prev_im = cv2.cvtColor(prev_im, cv2.COLOR_BGR2RGB)
+                break
+            
+            dt -= 1
+            continue
+        
+        if flag == False:
+            prev_im = cur_im
+            
+        ellip_info = self.get_ellip_info(fn_split)
+
+        cur_im = np.expand_dims(cur_im, axis=0)
+        prev_im = np.expand_dims(prev_im, axis=0)
+
+
+        return cur_im, prev_im, ellip_info, fn
+         

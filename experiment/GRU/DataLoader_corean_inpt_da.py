@@ -32,8 +32,10 @@ class DataLoader_c():
 
     def get_next_sequence(self):
 
-        H, W = self.dataset_size
-        h, w = self.im_size
+        #h, w = self.im_size 
+        #h, w = int(h/2), int(w/2)
+        h, w = cfgs.inpt_resize_im_sz
+
       
         offset = [0, 0]
         i0, j0 = offset
@@ -51,12 +53,17 @@ class DataLoader_c():
 
         images = []
         images_da = []
+        flag = True
         #Read mask
-        mask = cv2.imread(im_path)[i0:i1, j0:j1]
+       
+        mask = cv2.imread(im_path)
+        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_CUBIC)
         mask = mask.astype(np.int64)
+        mask_sum = np.sum(np.where(mask>127.5, 1, 0))
+
+        
         #Read ims pre
         dt = -1
-        flag = True
         while True:
             t = int(frame) + dt * cfgs.inter
             
@@ -96,4 +103,4 @@ class DataLoader_c():
         da_im = da_im.astype(np.float32)[i0:i1, j0:j1][np.newaxis, ...]
         images_da.append(da_im)
 
-        return images, images_da, mask, fn, flag
+        return images, images_da, mask, fn, flag, mask_sum
