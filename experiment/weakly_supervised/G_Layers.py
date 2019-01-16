@@ -179,6 +179,7 @@ class U_Net_gp(object):
         x = dw_h_convs[name]
         
         #2. label occlusion
+        '''
         print('--------label occlusion-------------')
         x_class = x
         ch_class = out_ch
@@ -202,6 +203,7 @@ class U_Net_gp(object):
                 x_class = utils.conv2d_basic(x_class, fc_w, fc_b)
                 class_logits = tf.squeeze(x_class, [1,2])
         print('--------label occlusion end----------')
+        '''
 
         #3. up layers
         up_h_convs = {}
@@ -226,7 +228,8 @@ class U_Net_gp(object):
                 output_map = conv2d_layer(x, name, w_shape, pool_=0, if_relu=True, stride=1, stddev=stddev, if_dropout=True, keep_prob_=keep_prob_)
                 up_h_convs['out'] = output_map
 
-        return output_map, class_logits
+        #return output_map, class_logits
+        return output_map, None
 
 
           

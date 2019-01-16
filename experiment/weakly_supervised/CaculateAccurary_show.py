@@ -162,9 +162,16 @@ class Ellip_acc(object):
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
         #tmp       
         fn = filename.strip().decode('utf-8')
-        fn_full = '%s%s.bmp' % ('img', fn.split('img')[1])
-        im_full = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
+        #fn_full = '%s%s.bmp' % ('img', fn.split('img')[1])
+        #im_full = cv2.imread(os.path.join(cfgs.full_im_path, fn_full))
+        #im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
+
+        fn_full = '%s%s%s.bmp' % ('s8', 'img', fn.split('img')[1])
+        fn_full_path = os.path.join(cfgs.full_im_path, fn_full)
+        im_full = cv2.imread(fn_full_path)
         im = cv2.resize(im_full, (sz[1], sz[0]), interpolation=cv2.INTER_CUBIC)
+        
+
         
         #pred = remove_small_area(pred)
         for ii in range(sz[0]):
@@ -187,12 +194,12 @@ class Ellip_acc(object):
                 pred_ellip = np.array([ellipse_info[0][0], ellipse_info[0][1], ellipse_info[1][1], ellipse_info[1][0]])
 
             ellipse_info = (tuple(np.array([ellipse_info[0][0], ellipse_info[0][1]])), tuple(np.array([ellipse_info[1][0], ellipse_info[1][1]])), angle)
-            loss = self.haus_loss(pred_ellip, gt_ellip)
+            #loss = self.haus_loss(pred_ellip, gt_ellip)
         else:
             pred_ellip = np.array([0,0,0,0])
             ellipse_info = (tuple(np.array([0,0])), tuple(np.array([0,0])), 0)
-            loss = self.ellip_loss(pred_ellip, gt_ellip)
-        
+            #loss = self.ellip_loss(pred_ellip, gt_ellip)
+        loss = 0
         if is_save:
             
             #save worse result

@@ -7,12 +7,13 @@ import math
 import os
 import cv2
 import TensorflowUtils as utils
-import read_data_270_480 as scene_parsing_270_480
+#import read_data as scene_parsing
+import read_data_video as scene_parsing_v
 import datetime
 import pdb
 from BatchReader_multi_ellip_label2 import *
-import CaculateAccurary as accu
-#import CaculateAccurary_show as accu
+#import CaculateAccurary as accu
+import CaculateAccurary_video as accu
 from six.moves import xrange
 from label_pred import pred_visualize, anno_visualize, fit_ellipse, generate_heat_map, fit_ellipse_findContours
 from generate_heatmap import density_heatmap, density_heatmap_br, translucent_heatmap
@@ -91,7 +92,7 @@ class SeqFCNNet(FCNNet):
         self.logits, self.class_logits = self.inference(self.images, self.inference_name, self.channel, self.keep_prob)
 
         #1. U-net
-        self.logits = self.logits[:, 1:cfgs.ANNO_IMAGE_SIZE[0]+1, :, :]
+        self.logits = self.logits[:, 2:cfgs.ANNO_IMAGE_SIZE[0]+2, :, :]
         self.pro = tf.nn.softmax(self.logits)
         self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
         
@@ -114,12 +115,12 @@ class SeqFCNNet(FCNNet):
         self.pro = tf.nn.softmax(self.logits)
         self.pred_annotation = tf.expand_dims(tf.argmax(self.pro, dimension=3, name='pred'), dim=3)
         
-        sz = [cfgs.batch_size, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1]]
+        sz = [1, cfgs.ANNO_IMAGE_SIZE[0], cfgs.ANNO_IMAGE_SIZE[1], 1]
         comp = tf.ones(sz, dtype=tf.int32)
         mask_inverse = tf.where(tf.less_equal(self.pro[:, :, :, 1], cfgs.filter_pro), comp, 1-comp)
-        mask_inst = tf.where(tf.equal(tf.squeeze(self.annotations, axis=3), 1), comp, 1-comp)
+        mask_inst = tf.where(tf.equal(self.annotations, 1), comp, 1-comp)
 
-        mask_filter = tf.cast(tf.where(tf.equal(mask_inverse + mask_inst, 2), 1-comp, comp), tf.float32)
+        mask_filter = tf.where(tf.equal(mask_inverse + mask_inst, 2), 1-comp, comp)
 
 
         self.loss = tf.reduce_mean(mask_filter * (tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits,
@@ -154,8 +155,8 @@ class SeqFCNNet(FCNNet):
     def build(self):
         
         self.get_data_cache()
-        #self.loss()
-        self.weak_loss()
+        self.loss()
+        #self.weak_loss()
         self.acc_label2()
         self.acc_label2_lower()
         self.multi_focal_loss()
@@ -320,9 +321,7 @@ class SeqFCNNet(FCNNet):
                            self.ellip_axis: ellip_info_mean})
                 
                 #View result
-                #if count % 20 == 0:
-                if True:
-                    self.view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
+                self.view_valid(filenames, pred_anno, pred_seq_pro, images_, step)
 
 
                 writer.add_summary(summary_str, global_step=step)
@@ -411,8 +410,8 @@ class SeqFCNNet(FCNNet):
                 
  
                 #pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou, self.acc_label_ = sess.run([self.pred_anno_lower, self.pro, self.summary_op, self.loss, self.accu_tensor_lower, self.accu_iou_tensor_lower, self.acc_label],
-                pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou, pred_p2_c_num, add4, pred_p2_c  = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor, self.accu_iou_tensor, self.pred_p2_c_num, self.add4, self.pred_p2_c],
-                #pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
+                #pred_anno_, pred_seq_pro_, summary_str, loss, _, self.accu, self.accu_iou, pred_p2_c_num, add4, pred_p2_c  = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.train_op, self.accu_tensor, self.accu_iou_tensor, self.pred_p2_c_num, self.add4, self.pred_p2_c],
+                pred_anno_, pred_seq_pro_, summary_str, loss, self.accu, self.accu_iou = sess.run([self.pred_annotation, self.pro, self.summary_op, self.loss, self.accu_tensor, self.accu_iou_tensor],
 
                                                                 feed_dict={self.images: images_, 
                                                                          self.annotations: annos_, self.lr: self.learning_rate,
@@ -428,9 +427,10 @@ class SeqFCNNet(FCNNet):
                                                                          #self.ellip_high: ellip_info_high,
                                                                          self.ellip_axis: ellip_info_mean})
                 
-                if count % 20 == 0:      
-                #if False:
-                    self.view(filenames, pred_anno_, pred_seq_pro_, images_, step)
+               
+                #print('laebls: ', labels)
+                #print('pred_labels: ', self.pred_label_)
+                self.view(filenames, pred_anno_, pred_seq_pro_, images_, step)
                 
 
                 #2. calculate accurary
@@ -484,7 +484,7 @@ class SeqFCNNet(FCNNet):
 def main():
  
     with tf.device('/gpu:0'):
-        train_records, valid_records = scene_parsing_270_480.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
+        train_records, valid_records = scene_parsing_v.my_read_dataset(cfgs.seq_list_path, cfgs.anno_path)
         print('The number of train records is %d and valid records is %d.' % (len(train_records), len(valid_records)))
         model = SeqFCNNet(cfgs.mode, cfgs.max_epochs, cfgs.batch_size, cfgs.NUM_OF_CLASSESS, train_records, valid_records, cfgs.IMAGE_SIZE, cfgs.init_lr, cfgs.keep_prob, cfgs.logs_dir)
         model.build()
